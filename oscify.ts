@@ -1,4 +1,4 @@
-// First order of business: turn ReadableStreams into async iterators to make them easier to deal with:
+//// First order of business: turn ReadableStreams into async iterators to make them easier to deal with:
 
 async function* toChunkIterator(stream : ReadableStreamDefaultReader<Uint8Array>) : AsyncIterable<Uint8Array> {
 	while ( true ) {
@@ -58,25 +58,175 @@ const ABS_HAT1X = 18
 const ABS_HAT0Y = 17
 const ABS_HAT1Y = 19
 
-const paths = [];
+//// OSC transport stuff
+
+// Note: Could use a more general-purpose Danducer-based parser system, but meh,
+// Consumer<T> is probably good enough for starters.
+
+import { Message as OSCMessage } from "https://deno.land/x/osc@v0.1.0/mod.ts";
+
+interface Consumer<T> {
+	accept(item:T) : void;
+}
+
+class UDPSink implements Consumer<Uint8Array> {
+	#conn : Deno.DatagramConn;
+	#target : Deno.Addr;
+	#debug : Consumer<string>;
+	constructor(conn:Deno.DatagramConn, target:Deno.Addr, debug?:Consumer<string>) {
+		this.#conn = conn;
+		this.#target = target;
+		this.#debug = debug || { accept(t) { } };
+	}
+	accept(data:Uint8Array) {
+		this.#debug.accept(`Attempting to send ${data.length} bytes to ${JSON.stringify(this.#target)}`);
+		this.#conn.send(data, this.#target);
+	}
+}
+
+class OSCSink implements Consumer<OSCMessage> {
+	#sink : Consumer<Uint8Array>;
+	constructor(sink : Consumer<Uint8Array>) {
+		this.#sink = sink;
+	}
+	accept(msg:OSCMessage) {
+		this.#sink.accept(msg.marshal());
+	}
+}
+
+class MultiSink<T> implements Consumer<T> {
+	#subs : Consumer<T>[];
+	constructor(subs : Consumer<T>[] ) {
+		this.#subs = subs;
+	}
+	accept(item: T): void {
+		for( const sub of this.#subs ) {
+			sub.accept(item);
+		}
+	}
+}
+
+class InputEventToOSCSink implements Consumer<InputEvent> {
+	#oscSink : Consumer<OSCMessage>;
+	#path : string;
+	constructor(oscSink : Consumer<OSCMessage>, path:string) {
+		this.#oscSink = oscSink;
+		this.#path = path;
+	}
+	accept(event: InputEvent): void {
+		if( event.type == EV_ABS ) {
+			let weightIdx = -1;
+			switch( event.code ) {
+			case ABS_HAT0X: weightIdx = 0; break;
+			case ABS_HAT1X: weightIdx = 1; break;
+			case ABS_HAT0Y: weightIdx = 2; break;
+			case ABS_HAT1Y: weightIdx = 3; break;
+			}
+			if( weightIdx > 0 ) {
+				// this.weights[weightIdx] = event.value;
+				this.#oscSink.accept(new OSCMessage(this.#path+"/"+weightIdx).append(event.value));
+			}
+		}
+	}
+}
+
+function uint8ArrayToHex(data:Uint8Array) : string {
+	const hexes = [];
+	for( const b of data ) hexes.push(((b >> 4) & 0x0F).toString(16) + (b & 0x0F).toString(16));
+	return hexes.join('');
+}
+
+
+const paths : string[] = [];
+const targetSpecs : string[] = [];
 // Data collected on Steam Deck seems little endian.
 // Probably the most common and a reasonable default.
 let littleEndian = true;
 for( const arg of Deno.args ) {
+	let m : RegExpExecArray|null;
 	if( '--little-endian' == arg ) {
 		littleEndian = true;
 	} else if( '--big-endian' == arg ) {
 		littleEndian = false;
 	} else if( /^[^-]/.exec(arg) !== null ) {
 		paths.push(arg);
+	} else if( (m = /--target=(.*)/.exec(arg)) !== null ) {
+		targetSpecs.push(m[1]);
 	} else {
 		console.error(`Unrecognized argument: ${arg}`);
 		Deno.exit(1);
 	}
 }
+
+const OSCUDP_TARGET_REGEX = new RegExp(
+	"^osc\\+udp://" +
+	"(?:\\[(?<bracketedhostname>[^\\]]+)\\]|(?<hostname>[^:]+))" +
+	":(?<port>\\d+)" +
+	"(?:;localhost=(?<localhost>[^;\\/]+))?" +
+	"(?:;debug=(?<debug>on|off))?" +
+	"(?<path>/.*)$"
+);
+
+const eventSinks = [];
+for( const targetSpec of targetSpecs ) {
+	let m : RegExpExecArray|null;
+	if( "debug" == targetSpec ) {
+		eventSinks.push({
+			accept(item:InputEvent) {
+				console.log(`input-event type=${item.type} code=${item.code} value=${item.value}`);
+			}
+		})
+	} else if( (m = /^osc\+debug:(?<path>\/.*)$/.exec(targetSpec)) !== null ) {
+		const path : string = m.groups!["path"];
+		eventSinks.push(new InputEventToOSCSink({
+			accept(item:OSCMessage) {
+				console.log(`osc-packet ${uint8ArrayToHex(item.marshal())}`)
+			}
+		}, path));
+	} else if( (m = OSCUDP_TARGET_REGEX.exec(targetSpec)) !== null ) {
+		// 'bracketedhostname' is to support IPv6 addresses in URIs, like http://[fe80::9908:15:1bb5:39db%18]:1234/some-path
+		// Possibly parsing should be stricter.
+		const hostname : string = m.groups!["hostname"] || m.groups!["bracketedhostname"];
+		const port : number = +m.groups!["port"];
+		const path : string = m.groups!["path"];
+		// TODO: If localhost not explicitly specified, determine whether this will need to use IPv4 or IPv6
+		// and create the listenDatagram using the corresponding localhost address.
+		// Otherwise you might get
+		// 'Error: An address incompatible with the requested protocol was used. (os error 10047)'
+		const localHostname = m.groups!["localhost"] || "localhost";
+		const debugging = (m.groups!["debug"] || "off") == "on";
+		// TODO: Allow local port to be overridden, pick one at random,
+		// nd/or pass the allow reuse flag, if that's a thing
+		const udpSink = new UDPSink(
+			Deno.listenDatagram({transport: "udp", port: port-1, hostname: localHostname }),
+			{
+				transport: "udp",
+				hostname,
+				port
+			},
+			debugging ? {
+				accept(text:string) { console.log("udpSink: "+text); }
+			} : undefined
+		);
+		const oscSink = new OSCSink(udpSink);
+		eventSinks.push(
+			new InputEventToOSCSink(oscSink, path)
+		);
+	} else {
+		throw new Error(`Unrecognized target spec: '${targetSpec}'`);
+	}
+}
+
+const eventSink = new MultiSink(eventSinks);
+
+
 if( paths.length == 0 ) {
 	console.warn("No inputs specified");
 }
+if( eventSinks.length == 0 ) {
+	console.warn("No targets specified");
+}
+
 
 for( const eventDevPath of paths ) {
 	const instream = await Deno.open(eventDevPath, { read: true });
@@ -84,22 +234,13 @@ for( const eventDevPath of paths ) {
 	try {
 		let eventCount = 0;
 		let byteCount = 0;
-		const weights = [0,0,0,0];
 		for await(const chunk of toFixedSizeChunks(EVENT_SIZE, toChunkIterator(inreadable))) {
 			byteCount += chunk.length;
 			eventCount += 1;
 			const dataView = new DataView(chunk.buffer, 0, chunk.byteLength);
 			const event = decodeInputEvent(dataView, littleEndian);
-			console.log(`Event: ${JSON.stringify(event)}`);
-			if( event.type == EV_ABS ) {
-				switch( event.code ) {
-				case ABS_HAT0X: weights[0] = event.value; break;
-				case ABS_HAT1X: weights[1] = event.value; break;
-				case ABS_HAT0Y: weights[2] = event.value; break;
-				case ABS_HAT1Y: weights[3] = event.value; break;
-				}
-			}
-			console.log(`Weights: ${JSON.stringify(weights)}`);
+			//console.log(`Event: ${JSON.stringify(event)}`);
+			eventSink.accept(event);
 		}
 		console.log(`Read ${byteCount} bytes, and ${eventCount} events`);
 	} finally {

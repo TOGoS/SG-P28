@@ -79,7 +79,7 @@ class UDPSink implements Consumer<Uint8Array> {
 		this.#debug = debug || { accept(t) { } };
 	}
 	accept(data:Uint8Array) {
-		this.#debug.accept(`Attempting to send ${data.length} bytes to ${JSON.stringify(this.#target)}`);
+		this.#debug.accept(`Attempting to send ${data.length} bytes to ${JSON.stringify(this.#target)}: ${uint8ArrayToHex(data)}`);
 		this.#conn.send(data, this.#target);
 	}
 }

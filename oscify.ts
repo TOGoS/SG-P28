@@ -163,12 +163,15 @@ const targetSpecs : string[] = [];
 // Probably the most common and a reasonable default.
 let littleEndian = true;
 let interMessageDelayMs = 0;
+let loopOverInputs = false;
 for( const arg of Deno.args ) {
 	let m : RegExpExecArray|null;
 	if( '--little-endian' == arg ) {
 		littleEndian = true;
 	} else if( '--big-endian' == arg ) {
 		littleEndian = false;
+	} else if( '--loop' == arg ) {
+		loopOverInputs = true;
 	} else if( /^[^-]/.exec(arg) !== null ) {
 		paths.push(arg);
 	} else if( (m = /--delay=(\d+)ms/.exec(arg)) !== null ) {
@@ -253,34 +256,36 @@ if( eventSinks.length == 0 ) {
 
 const textEncoder = new TextEncoder();
 
-for( const eventDevPath of paths ) {
-	const instream = await Deno.open(eventDevPath, { read: true });
-	const inreadable = instream.readable.getReader();
-	try {
-		let eventCount = 0;
-		let byteCount = 0;
-		let minValue = Infinity;
-		let maxValue = -Infinity;
-		for await(const chunk of toFixedSizeChunks(EVENT_SIZE, toChunkIterator(inreadable))) {
-			byteCount += chunk.length;
-			eventCount += 1;
-			const dataView = new DataView(chunk.buffer, 0, chunk.byteLength);
-			const event = decodeInputEvent(dataView, littleEndian);
-			//console.log(`Event: ${JSON.stringify(event)}`);
-			eventSink.accept(event);
+do {
+		for( const eventDevPath of paths ) {
+		const instream = await Deno.open(eventDevPath, { read: true });
+		const inreadable = instream.readable.getReader();
+		try {
+			let eventCount = 0;
+			let byteCount = 0;
+			let minValue = Infinity;
+			let maxValue = -Infinity;
+			for await(const chunk of toFixedSizeChunks(EVENT_SIZE, toChunkIterator(inreadable))) {
+				byteCount += chunk.length;
+				eventCount += 1;
+				const dataView = new DataView(chunk.buffer, 0, chunk.byteLength);
+				const event = decodeInputEvent(dataView, littleEndian);
+				//console.log(`Event: ${JSON.stringify(event)}`);
+				eventSink.accept(event);
 
-			minValue = Math.min(minValue, event.value);
-			maxValue = Math.max(maxValue, event.value);
+				minValue = Math.min(minValue, event.value);
+				maxValue = Math.max(maxValue, event.value);
 
-			let statMsg = `Packets sent: ${leftPad("     ",""+eventCount)}; Vmin: ${leftPad("     ",""+minValue)}; Vmax: ${leftPad("     ",""+maxValue)};`;
-			for( const [k,count] of chanStats.entries() ) {
-				statMsg += ` ${k} (${count})`;
+				let statMsg = `Packets sent: ${leftPad("     ",""+eventCount)}; Vmin: ${leftPad("     ",""+minValue)}; Vmax: ${leftPad("     ",""+maxValue)};`;
+				for( const [k,count] of chanStats.entries() ) {
+					statMsg += ` ${k} (${count})`;
+				}
+				Deno.stdout.write(textEncoder.encode(`${statMsg}\r`));
+				await delay(interMessageDelayMs);
 			}
-			Deno.stdout.write(textEncoder.encode(`${statMsg}\r`));
-			await delay(interMessageDelayMs);
+			console.log(`Read ${byteCount} bytes, and ${eventCount} events`);
+		} finally {
+			inreadable.cancel();
 		}
-		console.log(`Read ${byteCount} bytes, and ${eventCount} events`);
-	} finally {
-		inreadable.cancel();
 	}
-}
+} while( loopOverInputs );

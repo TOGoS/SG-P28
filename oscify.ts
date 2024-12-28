@@ -64,6 +64,8 @@ const ABS_HAT1Y = 19
 // Consumer<T> is probably good enough for starters.
 
 import { Message as OSCMessage } from "https://deno.land/x/osc@v0.1.0/mod.ts";
+import { delay } from "https://deno.land/std@0.224.0/async/delay.ts";
+import { assertEquals } from "https://deno.land/std@0.165.0/testing/asserts.ts";
 
 interface Consumer<T> {
 	accept(item:T) : void;
@@ -106,6 +108,8 @@ class MultiSink<T> implements Consumer<T> {
 	}
 }
 
+const chanStats = new Map<string,number>();
+
 class InputEventToOSCSink implements Consumer<InputEvent> {
 	#oscSink : Consumer<OSCMessage>;
 	#path : string;
@@ -122,9 +126,11 @@ class InputEventToOSCSink implements Consumer<InputEvent> {
 			case ABS_HAT0Y: weightIdx = 2; break;
 			case ABS_HAT1Y: weightIdx = 3; break;
 			}
-			if( weightIdx > 0 ) {
+			if( weightIdx >= 0 ) {
 				// this.weights[weightIdx] = event.value;
-				this.#oscSink.accept(new OSCMessage(this.#path+"/"+weightIdx).append(event.value));
+				const destPath = this.#path+"/"+weightIdx;
+				chanStats.set(destPath, (chanStats.get(destPath) || 0)+1);
+				this.#oscSink.accept(new OSCMessage(destPath).append(event.value));
 			}
 		}
 	}
@@ -136,12 +142,27 @@ function uint8ArrayToHex(data:Uint8Array) : string {
 	return hexes.join('');
 }
 
+function leftPad(template:string, insertMe:string) {
+	const diff = template.length - insertMe.length;
+	if( insertMe.length > template.length ) return insertMe.substring(-diff);
+	return template.substring(0, diff) + insertMe;
+}
+
+Deno.test({
+	name: "leftPad with zero-length template",
+	fn() { assertEquals("", leftPad("", "anything")); }
+});
+Deno.test({
+	name: "leftPad something reasonable",
+	fn() { assertEquals("horsemaster", leftPad("horseHELLO!", "master")); }
+});
 
 const paths : string[] = [];
 const targetSpecs : string[] = [];
 // Data collected on Steam Deck seems little endian.
 // Probably the most common and a reasonable default.
 let littleEndian = true;
+let interMessageDelayMs = 0;
 for( const arg of Deno.args ) {
 	let m : RegExpExecArray|null;
 	if( '--little-endian' == arg ) {
@@ -150,6 +171,8 @@ for( const arg of Deno.args ) {
 		littleEndian = false;
 	} else if( /^[^-]/.exec(arg) !== null ) {
 		paths.push(arg);
+	} else if( (m = /--delay=(\d+)ms/.exec(arg)) !== null ) {
+		interMessageDelayMs = +m[1];
 	} else if( (m = /--target=(.*)/.exec(arg)) !== null ) {
 		targetSpecs.push(m[1]);
 	} else {
@@ -228,12 +251,16 @@ if( eventSinks.length == 0 ) {
 }
 
 
+const textEncoder = new TextEncoder();
+
 for( const eventDevPath of paths ) {
 	const instream = await Deno.open(eventDevPath, { read: true });
 	const inreadable = instream.readable.getReader();
 	try {
 		let eventCount = 0;
 		let byteCount = 0;
+		let minValue = Infinity;
+		let maxValue = -Infinity;
 		for await(const chunk of toFixedSizeChunks(EVENT_SIZE, toChunkIterator(inreadable))) {
 			byteCount += chunk.length;
 			eventCount += 1;
@@ -241,6 +268,16 @@ for( const eventDevPath of paths ) {
 			const event = decodeInputEvent(dataView, littleEndian);
 			//console.log(`Event: ${JSON.stringify(event)}`);
 			eventSink.accept(event);
+
+			minValue = Math.min(minValue, event.value);
+			maxValue = Math.max(maxValue, event.value);
+
+			let statMsg = `Packets sent: ${leftPad("     ",""+eventCount)}; Vmin: ${leftPad("     ",""+minValue)}; Vmax: ${leftPad("     ",""+maxValue)};`;
+			for( const [k,count] of chanStats.entries() ) {
+				statMsg += ` ${k} (${count})`;
+			}
+			Deno.stdout.write(textEncoder.encode(`${statMsg}\r`));
+			await delay(interMessageDelayMs);
 		}
 		console.log(`Read ${byteCount} bytes, and ${eventCount} events`);
 	} finally {

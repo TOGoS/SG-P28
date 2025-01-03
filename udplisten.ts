@@ -1,3 +1,4 @@
+/// <reference lib="Deno.window"/>
 // Can I receive my own UDP packets?
 
 function uint8ArrayToHex(data:Uint8Array) : string {

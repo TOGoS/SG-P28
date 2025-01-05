@@ -115,7 +115,11 @@ async function createDevice(
 
 async function removeDevice(devicePath: string) {
 	try {
-		await Deno.remove(devicePath);
+		try {
+			await Deno.remove(devicePath);
+		} catch (_err) {
+			// Don't care.
+		}
 		if (devices[devicePath]) {
 			delete devices[devicePath];
 		}
@@ -128,7 +132,10 @@ async function removeDevice(devicePath: string) {
 async function writeToDevice(devicePath: string) {
 	info(`Starting writing to device at ${devicePath}...`);
 	try {
-		const writeStream = await Deno.open(devicePath, { write: true });
+		const writeStream = await Deno.open(devicePath, {
+			read: true,
+			write: true,
+		});
 		try {
 			while (devices[devicePath] && running) {
 				const data = new Uint8Array(24);

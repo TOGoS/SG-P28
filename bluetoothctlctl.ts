@@ -1,11 +1,13 @@
-import { toLines } from './src/main/ts/streamiter.ts';
+import { toChunkIterator, toLines } from './src/main/ts/streamiter.ts';
 
 type ProcSig = Deno.Signal;
 type ProcStat = Deno.CommandStatus;
 
 interface ProcessLike {
 	kill(sig: ProcSig): void;
-	get status(): Promise<ProcStat>;
+	readonly status: Promise<ProcStat>;
+	readonly pid   : number|string;
+	readonly name? : string;
 }
 
 function absMax(a: number, b: number): number {
@@ -23,21 +25,27 @@ function mergeStatus(a: ProcStat, b: ProcStat): ProcStat {
 }
 
 class ProcessGroup implements ProcessLike {
-	private children: ProcessLike[] = [];
+	#children: ProcessLike[] = [];
+	#pid : string;
+	constructor(pid:string) {
+		this.#pid = pid;
+	}
 	
 	add(process: ProcessLike): void {
-		this.children.push(process);
+		this.#children.push(process);
 	}
 	
 	kill(sig: Deno.Signal): void {
-		for (const process of this.children) {
+		console.log(`# Killing process group ${this.#pid} with signal ${sig}`);
+		for (const process of this.#children) {
+			console.log(`#   Killing child process ${process.pid}${process.name ? ' ('+process.name+')' : ''} with signal ${sig}`);
 			process.kill(sig);
 		}
 	}
 	
 	async #getStatus() : Promise<ProcStat> {
 		let status : ProcStat = { success: true, code: 0, signal: null };
-		for (const child of this.children) {
+		for (const child of this.#children) {
 			const childStatus = await child.status;
 			status = mergeStatus(status, childStatus);
 		}
@@ -47,18 +55,28 @@ class ProcessGroup implements ProcessLike {
 	get status(): Promise<ProcStat> {
 		return this.#getStatus();
 	}
+	
+	get pid(): string {
+		return this.pid;
+	}
 }
 
-function functionToProcessLike(fn: (signal:AbortSignal) => Promise<ProcStat>): ProcessLike {
+let nextPseudoPid = 0;
+
+function newPseudoPid() : string {
+	return "PS:"+(nextPseudoPid++).toString();
+}
+
+function functionToProcessLike(fn: (signal:AbortSignal) => Promise<ProcStat>, opts: {name?:string, pid?:string} = {}): ProcessLike {
+	const pid = opts.pid ?? newPseudoPid();
+	const name = opts.name;
 	const controller = new AbortController();
 	const prom = fn(controller.signal);
 	return {
-		kill(sig: ProcSig) {
-			controller.abort();
-		},
-		get status() {
-			return prom;
-		},
+		kill(sig: ProcSig) { controller.abort(sig); },
+		get status() { return prom; },
+		get pid() { return pid; },
+		get name() { return name; },
 	};
 }
 
@@ -72,10 +90,10 @@ function main(args: string[]): ProcessGroup {
 	});
 	const process = cmd.spawn();
 	const stdinWriter = process.stdin.getWriter();
-	const stdout = process.stdout;
-	const stderr = process.stderr;
+	const stdoutReader = process.stdout.getReader();
+	const stderrReader = process.stderr.getReader();
 	
-	const processGroup = new ProcessGroup();
+	const processGroup = new ProcessGroup(newPseudoPid());
 	processGroup.add(process);
 	
 	const stdinProcess = functionToProcessLike(async (signal) => {
@@ -83,12 +101,18 @@ function main(args: string[]): ProcessGroup {
 		const stdinLines = toLines(Deno.stdin.readable);
 		
 		for await (const line of stdinLines) {
-			if (signal.aborted) break;
+			if (signal.aborted) return { code: 1, success: false, signal: signal.reason };
+			
 			const trimmed = line.trim();
 			if (trimmed === "" || trimmed.startsWith("#")) continue;
 			
+			if (trimmed === "kill") {
+				console.log("# Killing process group...");
+				processGroup.kill("SIGKILL");
+				break;
+			}
 			if (trimmed === "exit") {
-				console.log("Exiting...");
+				console.log("# Exiting...");
 				await stdinWriter.close();
 				break;
 			}
@@ -97,29 +121,46 @@ function main(args: string[]): ProcessGroup {
 			await stdinWriter.write(data);
 		}
 		return process.status;
-	});
+	}, {name: "stdin-piper"});
 	
 	const stdoutProcess = functionToProcessLike(async (signal) => {
-		const stdoutLines = toLines(stdout);
+		signal.addEventListener("abort", () => stdoutReader.cancel());
+		const stdoutLines = toLines(toChunkIterator(stdoutReader));
 		for await (const line of stdoutLines) {
-			if (signal.aborted) break;
+			if (signal.aborted) return { code: 1, success: false, signal: signal.reason };
 			console.log(line);
 		}
 		return process.status;
-	});
+	}, {name: "stdout-piper"});
 	
 	const stderrProcess = functionToProcessLike(async (signal) => {
-		const stderrLines = toLines(stderr);
+		signal.addEventListener("abort", () => stderrReader.cancel());
+		const stderrLines = toLines(toChunkIterator(stderrReader));
 		for await (const line of stderrLines) {
-			if (signal.aborted) break;
+			if (signal.aborted) return { code: 1, success: false, signal: signal.reason };
 			console.error(line);
 		}
-		return process.status;
-	});
+		return { code: 0, success: true, signal: null };
+	}, {name: "stderr-piper"});
 	
 	processGroup.add(stdinProcess);
 	processGroup.add(stdoutProcess);
 	processGroup.add(stderrProcess);
+	
+	processGroup.add(functionToProcessLike((signal) => {
+		const processes : {[k:string]: ProcessLike} = {
+			process: process,
+			stdin: stdinProcess,
+			stdout: stdoutProcess,
+			stderr: stderrProcess,
+		};
+		const reportPromises = [];
+		for( const key in processes ) {
+			const proc = processes[key];
+			reportPromises.push(proc.status.then(stat => { console.log(`# ${key} (${proc.pid}) done: ${JSON.stringify(stat)}`); }));
+		}
+		return Promise.all(reportPromises).then(() => ({ success: true, code: 0, signal: null }));
+	}, {name: "exit-reporter"}));
 	
 	return processGroup;
 }

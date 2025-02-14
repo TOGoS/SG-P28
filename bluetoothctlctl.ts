@@ -80,7 +80,7 @@ function functionToProcessLike(fn: (signal:AbortSignal) => Promise<number>, opts
 	};
 }
 
-function main(args: string[]): ProcessGroup {
+function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 	const command = args.length > 0 ? args : ["bluetoothctl"];
 	const cmd = new Deno.Command(command[0], {
 		args: command.slice(1),
@@ -178,7 +178,7 @@ function main(args: string[]): ProcessGroup {
 }
 
 if (import.meta.main) {
-	main(Deno.args).wait().then(c => {
+	spawnBluetoothCtlCtl(Deno.args).wait().then(c => {
 		console.log(`# Main process group done: ${c}`);
 		Deno.exit(c);
 	});

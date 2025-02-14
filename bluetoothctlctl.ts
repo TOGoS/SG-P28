@@ -2,154 +2,164 @@ import { toChunkIterator, toLines } from './src/main/ts/streamiter.ts';
 
 type ProcSig = Deno.Signal;
 type ProcStat = Deno.CommandStatus;
+type ProcessID = string;
 
-interface ProcessLike {
+type ProcessLike = {
 	kill(sig: ProcSig): void;
-	readonly status: Promise<ProcStat>;
-	readonly pid   : number|string;
+	readonly id    : ProcessID;
 	readonly name? : string;
+	wait() : Promise<number>;
 }
+
+const EXITCODE_ABORTED = 137; // 'I've been sigkilled'
 
 function absMax(a: number, b: number): number {
 	return Math.abs(a) > Math.abs(b) ? a : b;
 }
-function coalesce<T>(a: T | null, b: T | null): T | null {
-	return a != null ? a : b;
-}
-function mergeStatus(a: ProcStat, b: ProcStat): ProcStat {
-	return {
-		success: a.success && b.success,
-		code: absMax(a.code, b.code),
-		signal: coalesce(a.signal, b.signal),
-	};
+function combineExitCodes(codes: number[]): number {
+	return codes.reduce(absMax, 0);
 }
 
 class ProcessGroup implements ProcessLike {
 	#children: ProcessLike[] = [];
-	#pid : string;
-	constructor(pid:string) {
-		this.#pid = pid;
+	#id : string;
+	constructor(opts : {children? : ProcessLike[], id?:string} = {}) {
+		this.#children = opts.children ?? [];
+		this.#id = opts.id ?? newPseudoPid();
 	}
-	
-	add(process: ProcessLike): void {
-		this.#children.push(process);
-	}
-	
 	kill(sig: Deno.Signal): void {
-		console.log(`# Killing process group ${this.#pid} with signal ${sig}`);
+		console.log(`# Killing process group ${this.#id} with signal ${sig}`);
 		for (const process of this.#children) {
-			console.log(`#   Killing child process ${process.pid}${process.name ? ' ('+process.name+')' : ''} with signal ${sig}`);
+			console.log(`#   Killing child process ${process.id}${process.name ? ' ('+process.name+')' : ''} with signal ${sig}`);
 			process.kill(sig);
 		}
 	}
 	
-	async #getStatus() : Promise<ProcStat> {
-		let status : ProcStat = { success: true, code: 0, signal: null };
-		for (const child of this.#children) {
-			const childStatus = await child.status;
-			status = mergeStatus(status, childStatus);
-		}
-		return status;
+	wait() : Promise<number> {
+		return Promise.all(this.#children.map(child => child.wait())).then(combineExitCodes);
 	}
 	
-	get status(): Promise<ProcStat> {
-		return this.#getStatus();
+	get id(): string {
+		return this.id;
 	}
-	
-	get pid(): string {
-		return this.pid;
+}
+
+class DenoProcessLike implements ProcessLike {
+	#process: Deno.ChildProcess;
+	#name: string;
+	constructor(process: Deno.ChildProcess, opts: {name?:string} = {}) {
+		this.#process = process;
+		this.#name = opts.name ?? "";
 	}
+	kill(sig: Deno.Signal): void {
+		this.#process.kill(sig);
+	}
+	wait() : Promise<number> {
+		return this.#process.status.then(stat => stat.code);
+	}
+	get id(): string { return "sysproc:"+this.#process.pid; }
+	get name(): string { return this.#name; }
 }
 
 let nextPseudoPid = 0;
 
 function newPseudoPid() : string {
-	return "PS:"+(nextPseudoPid++).toString();
+	return "pseudoproc:"+(nextPseudoPid++).toString();
 }
 
-function functionToProcessLike(fn: (signal:AbortSignal) => Promise<ProcStat>, opts: {name?:string, pid?:string} = {}): ProcessLike {
-	const pid = opts.pid ?? newPseudoPid();
+function functionToProcessLike(fn: (signal:AbortSignal) => Promise<number>, opts: {name?:string, id?:string} = {}): ProcessLike {
+	const id = opts.id ?? newPseudoPid();
 	const name = opts.name;
 	const controller = new AbortController();
 	const prom = fn(controller.signal);
 	return {
 		kill(sig: ProcSig) { controller.abort(sig); },
-		get status() { return prom; },
-		get pid() { return pid; },
+		wait() { return prom; },
+		get id() { return id; },
 		get name() { return name; },
 	};
 }
 
 function main(args: string[]): ProcessGroup {
-	const command = Deno.args.length > 0 ? Deno.args : ["bluetoothctl"];
+	const command = args.length > 0 ? args : ["bluetoothctl"];
 	const cmd = new Deno.Command(command[0], {
 		args: command.slice(1),
 		stdin: "piped",
 		stdout: "piped",
 		stderr: "piped"
 	});
-	const process = cmd.spawn();
-	const stdinWriter = process.stdin.getWriter();
-	const stdoutReader = process.stdout.getReader();
-	const stderrReader = process.stderr.getReader();
+	const sysProc = cmd.spawn();
+	const stdinReader = Deno.stdin.readable.getReader();
+	const procStdinWriter = sysProc.stdin.getWriter();
+	const stdoutReader = sysProc.stdout.getReader();
+	const stderrReader = sysProc.stderr.getReader();
 	
-	const processGroup = new ProcessGroup(newPseudoPid());
-	processGroup.add(process);
+	const mainProcess = new DenoProcessLike(sysProc);
 	
+	const abortController = new AbortController();
+	
+	// Hmm, stdin maybe shouldn't be part of the process group.
+	// It is getting awkward to act both as a process in the group,
+	// and as the thing reading from Deno.stdin, due to all the different
+	// ways that it might need to be stopped or exit normally.
+	const stdinAbortController = new AbortController();
+	abortController.signal.addEventListener("abort", () => stdinAbortController.abort());
+	stdinAbortController.signal.addEventListener("abort", () => stdinReader.cancel());
 	const stdinProcess = functionToProcessLike(async (signal) => {
 		const encoder = new TextEncoder();
-		const stdinLines = toLines(Deno.stdin.readable);
-		
-		for await (const line of stdinLines) {
-			if (signal.aborted) return { code: 1, success: false, signal: signal.reason };
+		signal.addEventListener("abort", () => stdinReader.cancel());
+
+		for await (const line of toLines(toChunkIterator(stdinReader))) {
+			if (signal.aborted) return 1;
 			
 			const trimmed = line.trim();
 			if (trimmed === "" || trimmed.startsWith("#")) continue;
 			
+			// A few different ways to quit:
+			// - kill will forcibly kill the group and should result in a nonzero exit code
+			// - exit will close stdin and should result in a zero exit code
+			
 			if (trimmed === "kill") {
 				console.log("# Killing process group...");
-				processGroup.kill("SIGKILL");
+				abortController.abort("kill command entered");
 				break;
 			}
 			if (trimmed === "exit") {
 				console.log("# Exiting...");
-				await stdinWriter.close();
+				await procStdinWriter.close();
 				break;
 			}
 			
 			const data = encoder.encode(trimmed + "\n");
-			await stdinWriter.write(data);
+			await procStdinWriter.write(data);
 		}
-		return process.status;
+		return 0;
 	}, {name: "stdin-piper"});
+	mainProcess.wait().then(() => stdinAbortController.abort());
 	
 	const stdoutProcess = functionToProcessLike(async (signal) => {
 		signal.addEventListener("abort", () => stdoutReader.cancel());
 		const stdoutLines = toLines(toChunkIterator(stdoutReader));
 		for await (const line of stdoutLines) {
-			if (signal.aborted) return { code: 1, success: false, signal: signal.reason };
+			if (signal.aborted) return EXITCODE_ABORTED;
 			console.log(line);
 		}
-		return process.status;
+		return 0;
 	}, {name: "stdout-piper"});
 	
 	const stderrProcess = functionToProcessLike(async (signal) => {
 		signal.addEventListener("abort", () => stderrReader.cancel());
 		const stderrLines = toLines(toChunkIterator(stderrReader));
 		for await (const line of stderrLines) {
-			if (signal.aborted) return { code: 1, success: false, signal: signal.reason };
+			if (signal.aborted) return EXITCODE_ABORTED;
 			console.error(line);
 		}
-		return { code: 0, success: true, signal: null };
+		return 0;
 	}, {name: "stderr-piper"});
 	
-	processGroup.add(stdinProcess);
-	processGroup.add(stdoutProcess);
-	processGroup.add(stderrProcess);
-	
-	processGroup.add(functionToProcessLike((signal) => {
+	const exitReporter = functionToProcessLike(_sig => {
 		const processes : {[k:string]: ProcessLike} = {
-			process: process,
+			process: mainProcess,
 			stdin: stdinProcess,
 			stdout: stdoutProcess,
 			stderr: stderrProcess,
@@ -157,15 +167,19 @@ function main(args: string[]): ProcessGroup {
 		const reportPromises = [];
 		for( const key in processes ) {
 			const proc = processes[key];
-			reportPromises.push(proc.status.then(stat => { console.log(`# ${key} (${proc.pid}) done: ${JSON.stringify(stat)}`); }));
+			reportPromises.push(proc.wait().then(stat => { console.log(`# ${key} (${proc.id}) done: ${JSON.stringify(stat)}`); }));
 		}
-		return Promise.all(reportPromises).then(() => ({ success: true, code: 0, signal: null }));
-	}, {name: "exit-reporter"}));
+		return Promise.all(reportPromises).then(() => 0);
+	}, {name: "exit-reporter"});
 	
-	return processGroup;
+	const pg = new ProcessGroup({id: newPseudoPid(), children: [mainProcess, stdinProcess, stdoutProcess, stderrProcess, exitReporter]});
+	abortController.signal.addEventListener("abort", () => pg.kill("SIGKILL"));
+	return pg;
 }
 
-// Top-level command-line interface
 if (import.meta.main) {
-	Deno.exit((await main(Deno.args).status).code);
+	main(Deno.args).wait().then(c => {
+		console.log(`# Main process group done: ${c}`);
+		Deno.exit(c);
+	});
 }

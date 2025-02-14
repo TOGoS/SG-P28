@@ -46,3 +46,40 @@ export async function* toLines(chunks: AsyncIterable<Uint8Array>): AsyncIterable
 		yield buffer;
 	}
 }
+
+function join(a:Uint8Array, b:Uint8Array) : Uint8Array {
+	if( a.length == 0 ) return b;
+	if( b.length == 0 ) return a;
+	const c = new Uint8Array(a.length + b.length);
+	c.set(a);
+	c.set(b, a.length);
+	return c;
+}
+
+export async function* decodeUtf8(chunks: AsyncIterable<Uint8Array>): AsyncIterable<string> {
+	const decoder = new TextDecoder("utf-8", { fatal: true });
+	let buffer = new Uint8Array(0);
+	
+	for await( const chunk of chunks ) {
+		const combined = join(buffer, chunk);
+		
+		// Find the last byte that starts with 0b0 or 0b10
+		let boundary = combined.length;
+		while( boundary > 0 && (combined[boundary - 1] & 0b11000000) === 0b10000000 ) {
+			boundary--;
+		}
+		
+		// Decode the complete part of the buffer
+		const decodedString = decoder.decode(combined.subarray(0, boundary), { stream: true });
+		yield decodedString;
+		
+		// Buffer the incomplete part
+		buffer = combined.subarray(boundary);
+	}
+	
+	// If anything remains, it was invalid UTF-8.
+	// So this should throw an error.
+	if( buffer.length > 0 ) {
+		yield decoder.decode(buffer);
+	}
+}

@@ -1,3 +1,4 @@
+import { assertEquals } from 'https://deno.land/std@0.165.0/testing/asserts.ts';
 import { toCommands, Token, toTokens } from './src/main/ts/CommandTokenizer.ts';
 import { decodeUtf8 } from './src/main/ts/streamiter.ts';
 import { toChunkIterator, toLines } from './src/main/ts/streamiter.ts';
@@ -102,6 +103,33 @@ function tokensToSimpleCommand(tokens:Token[]) : SimpleCommand {
 	}
 }
 
+// Basically, look for the last ESC[0m followed by ']' or '#' and any whitespace, and skip past it.
+// deno-lint-ignore no-control-regex
+const btstripre = /^(.*?)\x1b\[0m[\]#]\s*/;
+
+function* cleanUpBluetoothCtlLines(line: string) : Iterable<string> {
+	const lines = line.split(/[\r\n]+/);
+	for( let line of lines ) {
+		let m : RegExpExecArray|null;
+		while( (m = btstripre.exec(line)) != null ) {
+			line = line.substring(m[0].length).trim();
+		}
+		if( line.length > 0 ) yield line;
+	}
+}
+
+function collect<T>( source:Iterable<T> ) : T[] {
+	const arr = [];
+	for( const item of source ) arr.push(item);
+	return arr;
+}
+
+Deno.test('parseBluetoothCtlLine', () => {
+	const input = "\u001b[0;94m[bluetooth]\u001b[0m#                         \r[\u001b[0;93mCHG\u001b[0m] Controller 40:F4:C9:6F:12:6D Pairable: yes"
+	const outputs = collect(cleanUpBluetoothCtlLines(input));
+	assertEquals(["Controller 40:F4:C9:6F:12:6D Pairable: yes"], outputs);
+});
+
 function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 	const command = args.length > 0 ? args : ["bluetoothctl"];
 	const cmd = new Deno.Command(command[0], {
@@ -172,7 +200,10 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 		const stdoutLines = toLines(toChunkIterator(stdoutReader));
 		for await (const line of stdoutLines) {
 			if (signal.aborted) return EXITCODE_ABORTED;
-			console.log(line);
+			
+			for( const parsed of cleanUpBluetoothCtlLines(line) ) {
+				console.log("Cleaned-up line from bluetoothctl: " + JSON.stringify(parsed));
+			}
 		}
 		return 0;
 	}, {name: "stdout-piper"});

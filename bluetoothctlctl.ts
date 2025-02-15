@@ -1,3 +1,5 @@
+import { toCommands, Token, toTokens } from './src/main/ts/CommandTokenizer.ts';
+import { decodeUtf8 } from './src/main/ts/streamiter.ts';
 import { toChunkIterator, toLines } from './src/main/ts/streamiter.ts';
 
 type ProcSig = Deno.Signal;
@@ -109,29 +111,45 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 		const encoder = new TextEncoder();
 		signal.addEventListener("abort", () => stdinReader.cancel());
 
-		for await (const line of toLines(toChunkIterator(stdinReader))) {
+		for await (const command of toCommands(toTokens(decodeUtf8(toChunkIterator(stdinReader))))) {
 			if (signal.aborted) return 1;
 			
-			const trimmed = line.trim();
-			if (trimmed === "" || trimmed.startsWith("#")) continue;
+			const cmdArgs = command.flatMap(tok => {
+				switch(tok.type) {
+				case "bareword":
+				case "quoted-string":
+					return [tok.value];
+				case 'newline':
+				case 'whitespace':
+				case 'comment':
+					return [];
+				default:
+					throw new Error(`Unrecognized token type: '${(tok as Token).type}'`);
+				}
+			});
 			
 			// A few different ways to quit:
-			// - kill will forcibly kill the group and should result in a nonzero exit code
-			// - exit will close stdin and should result in a zero exit code
+			// - `kill` will forcibly kill the group and should result in a nonzero exit code
+			// - `exit` will close stdin and should result in a zero exit code
+			// - `btc quit` or `btc exit` will tell bluetoothctl to close,
+			//   which should in turn result in this process group exiting
 			
-			if (trimmed === "kill") {
+			if (cmdArgs[0] === "kill") {
 				console.log("# Killing process group...");
 				abortController.abort("kill command entered");
 				break;
 			}
-			if (trimmed === "exit") {
+			if (cmdArgs[0] === "exit" || cmdArgs[0] == 'bye' || cmdArgs[0] == 'q') {
 				console.log("# Exiting...");
 				await procStdinWriter.close();
 				break;
 			}
-			
-			const data = encoder.encode(trimmed + "\n");
-			await procStdinWriter.write(data);
+			if (cmdArgs[0] == "btc") {
+				const data = encoder.encode(cmdArgs.slice(1).join(' ') + "\n");
+				await procStdinWriter.write(data);
+				continue;
+			}
+			console.log(`Unrecognized command: '${cmdArgs[0]}'`);
 		}
 		return 0;
 	}, {name: "stdin-piper"});

@@ -23,15 +23,24 @@ function decodeQuotedChars(chars: string) {
 	});
 }
 
-const tokenRegex = /^(?:(?<newline>\n)|(?<space>[ \t]+)|(?<bareword>\w+)|(?<quote>"(?<quotedChars>(?:[^"\\]|\\["\\bfnrt]|\\u[0-9a-fA-F]{4})*)")|(?<comment>#\s(?<commentText>[^\n]*)))/;
+const tokenRegex = /^(?:(?<newline>\n)|(?<space>[ \t\r]+)|(?<bareword>\w+)|(?<quote>"(?<quotedChars>(?:[^"\\]|\\["\\bfnrt]|\\u[0-9a-fA-F]{4})*)")|(?<comment>#\s(?<commentText>[^\n]*)))/;
 
 
 
 function tokenize(input:string, isEnd:boolean) : {tokens:Token[], remaining:string} {
 	const tokens : Token[] = [];
 	let match : RegExpExecArray|null;
+	
+	// A problem: If nothing matches, and never will,
+	// this just continues on to gobble up more chars.
+	// A nice hand-rolled parser might be better.
+	
 	while ((match = tokenRegex.exec(input)) !== null) {
 		const fullMatch = match[0];
+		
+		if( fullMatch.length == 0 ) {
+			throw new Error(`Match length = 0 at: '${input}'`);
+		}
 		
 		// Some tokens are self-delimiting;
 		// we can yield them right away
@@ -49,6 +58,8 @@ function tokenize(input:string, isEnd:boolean) : {tokens:Token[], remaining:stri
 			tokens.push({ type: "bareword", value: match.groups.bareword });
 		} else if (match.groups?.comment) {
 			tokens.push({ type: "comment", value: match.groups.commentText });
+		} else {
+			throw new Error(`Failed to tokenize: '${input}'`);
 		}
 		input = input.slice(fullMatch.length);
 	}

@@ -1,4 +1,4 @@
-import { toTokens, toCommands } from './CommandTokenizer.ts';
+import { Token, toTokens, toCommands } from './CommandTokenizer.ts';
 import { assertEquals } from "https://deno.land/std@0.165.0/testing/asserts.ts";
 
 async function* asyncGenerator<T>(items: T[]): AsyncIterable<T> {
@@ -97,7 +97,7 @@ Deno.test('toTokens with newline tokens', async () => {
 });
 
 Deno.test('toCommands with simple input', async () => {
-	const tokens = asyncGenerator([
+	const tokens = asyncGenerator<Token>([
 		{ type: "bareword", value: "hello" },
 		{ type: "whitespace" },
 		{ type: "bareword", value: "world" },
@@ -116,7 +116,7 @@ Deno.test('toCommands with simple input', async () => {
 });
 
 Deno.test('toCommands with multiple commands', async () => {
-	const tokens = asyncGenerator([
+	const tokens = asyncGenerator<Token>([
 		{ type: "bareword", value: "hello" },
 		{ type: "whitespace" },
 		{ type: "bareword", value: "world" },
@@ -146,7 +146,7 @@ Deno.test('toCommands with multiple commands', async () => {
 });
 
 Deno.test('toCommands with comments and empty lines', async () => {
-	const tokens = asyncGenerator([
+	const tokens = asyncGenerator<Token>([
 		{ type: "bareword", value: "hello" },
 		{ type: "whitespace" },
 		{ type: "bareword", value: "world" },
@@ -178,7 +178,7 @@ Deno.test('toCommands with comments and empty lines', async () => {
 });
 
 Deno.test('toCommands with incomplete command at end', async () => {
-	const tokens = asyncGenerator([
+	const tokens = asyncGenerator<Token>([
 		{ type: "bareword", value: "hello" },
 		{ type: "whitespace" },
 		{ type: "bareword", value: "world" }
@@ -196,7 +196,7 @@ Deno.test('toCommands with incomplete command at end', async () => {
 });
 
 Deno.test('toCommands with mixed input', async () => {
-	const tokens = asyncGenerator([
+	const tokens = asyncGenerator<Token>([
 		{ type: "bareword", value: "hello" },
 		{ type: "whitespace" },
 		{ type: "quoted-string", value: 'world' },

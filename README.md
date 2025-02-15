@@ -13,6 +13,3 @@ Planned features:
 - Automatically detect new boards as they are added
 - Some board identification routine
   (maybe you step on each board in order).
-
-I might find a way to use Pi Pico Ws to do this job,
-in which case this will become abandonware.

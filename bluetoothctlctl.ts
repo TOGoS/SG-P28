@@ -156,6 +156,9 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 	mainProcess.wait().then(() => stdinAbortController.abort());
 	
 	const stdoutProcess = functionToProcessLike(async (signal) => {
+		
+		// TODO: Parse bluetoothctl output!
+		
 		signal.addEventListener("abort", () => stdoutReader.cancel());
 		const stdoutLines = toLines(toChunkIterator(stdoutReader));
 		for await (const line of stdoutLines) {

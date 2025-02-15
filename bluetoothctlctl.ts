@@ -82,6 +82,26 @@ function functionToProcessLike(fn: (signal:AbortSignal) => Promise<number>, opts
 	};
 }
 
+type SimpleCommand = {args: string[]};
+
+function tokensToSimpleCommand(tokens:Token[]) : SimpleCommand {
+	return {
+		args: tokens.flatMap(tok => {
+			switch(tok.type) {
+			case "bareword":
+			case "quoted-string":
+				return [tok.value];
+			case 'newline':
+			case 'whitespace':
+			case 'comment':
+				return [];
+			default:
+				throw new Error(`Unrecognized token type: '${(tok as Token).type}'`);
+			}
+		})
+	}
+}
+
 function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 	const command = args.length > 0 ? args : ["bluetoothctl"];
 	const cmd = new Deno.Command(command[0], {
@@ -114,19 +134,8 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 		for await (const command of toCommands(toTokens(decodeUtf8(toChunkIterator(stdinReader))))) {
 			if (signal.aborted) return 1;
 			
-			const cmdArgs = command.flatMap(tok => {
-				switch(tok.type) {
-				case "bareword":
-				case "quoted-string":
-					return [tok.value];
-				case 'newline':
-				case 'whitespace':
-				case 'comment':
-					return [];
-				default:
-					throw new Error(`Unrecognized token type: '${(tok as Token).type}'`);
-				}
-			});
+			const cmd = tokensToSimpleCommand(command);
+			const cmdArgs = cmd.args;
 			
 			// A few different ways to quit:
 			// - `kill` will forcibly kill the group and should result in a nonzero exit code

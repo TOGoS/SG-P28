@@ -1,0 +1,66 @@
+[?2004hWaiting to connect to bluetoothd...[0;94m[bluetooth][0m# hci0 new_settings: powered bondable ssp br/edr le secure-conn 
+[0;94m[bluetooth][0m# Agent registered
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Controller 40:F4:C9:6F:12:6D Pairable: yes
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Controller 40:F4:C9:6F:12:6D Discovering: yes
+[0;94m[bluetooth][0m# [[0;92mNEW[0m] Device 00:21:BD:D1:5C:A9 00-21-BD-D1-5C-A9
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffca (-54)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffd6 (-42)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffce (-50)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffd6 (-42)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffce (-50)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 LegacyPairing: no
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Name: Nintendo RVL-WBC-01
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Alias: Nintendo RVL-WBC-01
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 LegacyPairing: yes
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffc4 (-60)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffce (-50)
+[0;94m[bluetooth][0m# [[0;91mDEL[0m] Device 00:21:BD:D1:5C:A9 Nintendo RVL-WBC-01
+[0;94m[bluetooth][0m# [[0;92mNEW[0m] Device 00:21:BD:D1:5C:A9 Nintendo RVL-WBC-01
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffc8 (-56)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Trusted: yes
+[0;94m[bluetooth][0m# [C[C[C[C[C[C[C[CNintendo RVL-WBC-01[[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Connected: yes
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Bonded: yes
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Modalias: usb:v057Ep0306d3A1C
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 UUIDs: 00001000-0000-1000-8000-00805f9b34fb
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 UUIDs: 00001124-0000-1000-8000-00805f9b34fb
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 UUIDs: 00001200-0000-1000-8000-00805f9b34fb
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 ServicesResolved: yes
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Paired: yes
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 WakeAllowed: yes
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 ServicesResolved: no
+[0;94m[Nintendo RVL-WBC-01][0m# [C[C[C[C[C[C[C[Cbluetooth[[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Connected: no
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffd2 (-46)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffbe (-66)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffd2 (-46)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffc2 (-62)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffd0 (-48)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffc8 (-56)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffd0 (-48)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffc8 (-56)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffd0 (-48)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffbc (-68)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffd0 (-48)
+[0;94m[bluetooth][0m# [C[C[C[C[C[C[C[CNintendo RVL-WBC-01[[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Connected: yes
+[0;94m[Nintendo RVL-WBC-01][0m# Request PIN code
+[0;94m[Nintendo RVL-WBC-01][0m# [C[C1;39m[agent] Enter PIN code: [0m[C[C0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Connected: no
+[0;94m[bluetooth][0m# Request canceled
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffc6 (-58)
+[0;94m[Nintendo RVL-WBC-01][0m# exit[K[K[K[K[K[?2004l[?2004h[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Connected: yes
+[0;94m[Nintendo RVL-WBC-01][0m# Request PIN code
+[0;94m[Nintendo RVL-WBC-01][0m# [C[C1;39m[agent] Enter PIN code: [0m0000
+[?2004l[?2004h[0;94m[Nintendo RVL-WBC-01][0m# [C[C[C[C[C[C[C[Cbluetooth[[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Connected: no
+[0;94m[bluetooth][0m# [[0;91mDEL[0m] Device 00:21:BD:D1:5C:A9 Nintendo RVL-WBC-01
+[0;94m[bluetooth][0m# [[0;92mNEW[0m] Device 00:21:BD:D1:5C:A9 Nintendo RVL-WBC-01
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffc6 (-58)
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Trusted: yes
+[0;94m[bluetooth][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffd2 (-46)
+[0;94m[bluetooth][0m# [C[C[C[C[C[C[C[CNintendo RVL-WBC-01[[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Connected: yes
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Bonded: yes
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Modalias: usb:v057Ep0306d3A1C
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 UUIDs: 00001000-0000-1000-8000-00805f9b34fb
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 UUIDs: 00001124-0000-1000-8000-00805f9b34fb
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 UUIDs: 00001200-0000-1000-8000-00805f9b34fb
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 ServicesResolved: yes
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 Paired: yes
+[0;94m[Nintendo RVL-WBC-01][0m# [[0;93mCHG[0m] Device 00:21:BD:D1:5C:A9 WakeAllowed: yes
+[0;94m[Nintendo RVL-WBC-01][0m# 

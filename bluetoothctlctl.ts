@@ -105,7 +105,8 @@ function tokensToSimpleCommand(tokens:Token[]) : SimpleCommand {
 
 // Basically, look for the last ESC[0m followed by ']' or '#' and any whitespace, and skip past it.
 // deno-lint-ignore no-control-regex
-const btstripre = /^(.*?)\x1b\[0m[\]#]\s*/;
+// const btstripre = /^.*?\x1b\[0m[\]#]\s*|^\[.*?\]#\s*/; // Might need this alternative if not getting escape codes
+const btstripre = /^.*?\x1b\[0m[\]#]\s*/;
 
 function* cleanUpBluetoothCtlLines(line: string) : Iterable<string> {
 	const lines = line.split(/[\r\n]+/);

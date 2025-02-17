@@ -103,19 +103,39 @@ function tokensToSimpleCommand(tokens:Token[]) : SimpleCommand {
 	}
 }
 
-// Basically, look for the last ESC[0m followed by ']' or '#' and any whitespace, and skip past it.
+// This might be more complex than needed because the
+// weirdness is from bluetoothctl emitting two things at once
+// and the characters got jumbled up:
 // deno-lint-ignore no-control-regex
-// const btstripre = /^.*?\x1b\[0m[\]#]\s*|^\[.*?\]#\s*/; // Might need this alternative if not getting escape codes
-const btstripre = /^.*?\x1b\[0m[\]#]\s*/;
+const escSeqRegex = /\x1b\[\d*C?[^m\x1b]*[m]?/g;
 
-function* cleanUpBluetoothCtlLines(line: string) : Iterable<string> {
+const btcPrarseRegex = /^\[([^\]]+)\]#\s+(.*)/;
+
+// TODO: Define types for the data I expect from BluetoothCtl
+function* parseBluetoothCtlLines(line: string) : Iterable<any> {
 	const lines = line.split(/[\r\n]+/);
 	for( let line of lines ) {
 		let m : RegExpExecArray|null;
-		while( (m = btstripre.exec(line)) != null ) {
-			line = line.substring(m[0].length).trim();
+		line = line.replaceAll(escSeqRegex, '');
+		while( (m = btcPrarseRegex.exec(line)) != null ) {
+			const hithere = m[1];
+			let payload = m[2];
+			
+			// This, too, might have happened because bluetoothctl was not
+			// careful to emit things one at a time, and so isn't
+			// really a sequence I should be looking for:
+			if( (m = /^(\[agent\] Enter PIN code:)\s+(.*)/.exec(payload)) != null ) {
+				payload = m[1];
+				line = m[2];
+			} else {
+				line = '';
+			}
+			
+			yield {
+				hithere,
+				payload,
+			}
 		}
-		if( line.length > 0 ) yield line;
 	}
 }
 
@@ -126,9 +146,10 @@ function collect<T>( source:Iterable<T> ) : T[] {
 }
 
 Deno.test('parseBluetoothCtlLine', () => {
-	const input = "\u001b[0;94m[bluetooth]\u001b[0m#                         \r[\u001b[0;93mCHG\u001b[0m] Controller 40:F4:C9:6F:12:6D Pairable: yes"
-	const outputs = collect(cleanUpBluetoothCtlLines(input));
-	assertEquals(["Controller 40:F4:C9:6F:12:6D Pairable: yes"], outputs);
+	const input = "\x1b[0;94m[bluetooth]\x1b[0m# [\x1b[0;93mCHG\x1b[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffca (-54)\n";
+	//const input = "\u001b[0;94m[bluetooth]\u001b[0m#                         \r[\u001b[0;93mCHG\u001b[0m] Controller 40:F4:C9:6F:12:6D Pairable: yes"
+	const outputs = collect(parseBluetoothCtlLines(input));
+	assertEquals([{dev: "bluetooth", payload: "[CHG] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffca (-54)"}], outputs);
 });
 
 function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
@@ -202,7 +223,7 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 		for await (const line of stdoutLines) {
 			if (signal.aborted) return EXITCODE_ABORTED;
 			
-			for( const parsed of cleanUpBluetoothCtlLines(line) ) {
+			for( const parsed of parseBluetoothCtlLines(line) ) {
 				console.log("Cleaned-up line from bluetoothctl: " + JSON.stringify(parsed));
 			}
 		}

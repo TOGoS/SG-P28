@@ -142,7 +142,9 @@ function* parseBluetoothCtlLines(line: string) : Iterable<BluetoothCtlEvent> {
 	for( const sourceLine of lines ) {
 		let m : RegExpExecArray|null;
 		let line = sourceLine.replaceAll(escSeqRegex, '');
+		let anythingParsed = false;
 		while( (m = btcPrarseRegex.exec(line)) != null ) {
+			anythingParsed = true;
 			const subjectType = m[1];
 			let payload1 = m[2];
 			let remainingLine : string;
@@ -217,6 +219,13 @@ function* parseBluetoothCtlLines(line: string) : Iterable<BluetoothCtlEvent> {
 			}
 			
 			line = remainingLine;
+		}
+		if( !anythingParsed ) {
+			/*yield {
+				eventType: "Unknown",
+				notes: ["Didn't recognize this line at all: "+line],
+				sourceLine
+			};*/
 		}
 	}
 }
@@ -295,8 +304,13 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 				await procStdinWriter.close();
 				break;
 			}
+			if (cmdArgs[0] == "echo") {
+				console.log(cmdArgs.slice(1).join(" "));
+				break;
+			}
 			if (cmdArgs[0] == "btc") {
 				const data = encoder.encode(cmdArgs.slice(1).join(' ') + "\n");
+				console.log(`# Sent command to bluetoothctl: ${data}`);
 				await procStdinWriter.write(data);
 				continue;
 			}
@@ -316,7 +330,7 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 			if (signal.aborted) return EXITCODE_ABORTED;
 			
 			for( const parsed of parseBluetoothCtlLines(line) ) {
-				console.log("Cleaned-up line from bluetoothctl: " + JSON.stringify(parsed));
+				console.log("event: " + JSON.stringify(parsed));
 			}
 		}
 		return 0;

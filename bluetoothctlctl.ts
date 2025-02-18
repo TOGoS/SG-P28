@@ -111,30 +111,112 @@ const escSeqRegex = /\x1b\[\d*C?[^m\x1b]*[m]?/g;
 
 const btcPrarseRegex = /^\[([^\]]+)\]#\s+(.*)/;
 
+// HEY Maybe if bluetoothctl is just using d-bus, I could just talk D-bus instead of messing with bluetoothctl's gross output?
+// Well, Deno D-Bus libraries seem to be lacking.
+
+type BluetoothCtlEvent = {
+	eventType: "PleaseEnterPIN",
+	sourceLine: string
+} | {
+	eventType: "New"|"Delete",
+	subjectType: "Device"|"Controller"|string,
+	subjectId: string, // MAC address
+	subjectName: string,
+	sourceLine: string
+} | {
+	eventType: "Change",
+	subjectType: "Device"|"Controller"|string,
+	subjectId: string, // MAC address
+	propertyName: string,
+	value: string,
+	sourceLine: string
+} | {
+	eventType: "Unknown",
+	notes: string[],
+	sourceLine: string
+}
+
 // TODO: Define types for the data I expect from BluetoothCtl
-function* parseBluetoothCtlLines(line: string) : Iterable<any> {
+function* parseBluetoothCtlLines(line: string) : Iterable<BluetoothCtlEvent> {
 	const lines = line.split(/[\r\n]+/);
-	for( let line of lines ) {
+	for( const sourceLine of lines ) {
 		let m : RegExpExecArray|null;
-		line = line.replaceAll(escSeqRegex, '');
+		let line = sourceLine.replaceAll(escSeqRegex, '');
 		while( (m = btcPrarseRegex.exec(line)) != null ) {
-			const hithere = m[1];
-			let payload = m[2];
+			const subjectType = m[1];
+			let payload1 = m[2];
+			let remainingLine : string;
 			
 			// This, too, might have happened because bluetoothctl was not
 			// careful to emit things one at a time, and so isn't
 			// really a sequence I should be looking for:
-			if( (m = /^(\[agent\] Enter PIN code:)\s+(.*)/.exec(payload)) != null ) {
-				payload = m[1];
-				line = m[2];
+			if( (m = /^(\[agent\] Enter PIN code:)\s+(.*)/.exec(payload1)) != null ) {
+				yield {
+					eventType: "PleaseEnterPIN",
+					sourceLine
+				};
+				
+				payload1 = m[1];
+				remainingLine = m[2];
+			} else if( (m = /\[(CHG|DEL|NEW)\]\s+(.*)/.exec(payload1)) != null ) {
+				const typeCode = m[1];
+				const payload2 = m[2];
+				
+				let evt : BluetoothCtlEvent;
+				let eventType : typeof evt.eventType;
+				switch( typeCode ) {
+				case "CHG": eventType = "Change"; break;
+				case "NEW": eventType = "New"   ; break;
+				case "DEL": eventType = "Delete"; break;
+				default: throw new Error(`Bad event type string: ${m[1]}`);
+				}
+				
+				if( eventType == "Change" ) {
+					if( (m = /(?<type>Device|Controller)\s+(?<id>\S+)\s+(?<prop>.*?):\s+(?<value>.*)/.exec(payload2)) != null ) {
+						yield {
+							eventType,
+							propertyName: m.groups?.prop || "?",
+							subjectId: m.groups?.id || "?",
+							subjectType: m.groups?.type || "?",
+							value: m.groups?.value || "?",
+							sourceLine
+						};
+					} else {
+						yield {
+							eventType: "Unknown",
+							notes: ["Looks like a change, but failed to parse payload2: "+payload2],
+							sourceLine,
+						};
+					}
+				} else {
+					if( (m = /(?<type>Device|Controller)\s+(?<id>\S+)\s+(?<name>.*)/.exec(payload2)) != null ) {
+						yield {
+							eventType,
+							subjectType: m.groups?.type || "?",
+							subjectId: m.groups?.id || "?",
+							subjectName: m.groups?.name || "?",
+							sourceLine
+						};
+					} else {
+						yield {
+							eventType: "Unknown",
+							notes: ["Looks like a new|delete, but failed to parse payload2: "+payload2],
+							sourceLine,
+						};
+					}
+				}
+				
+				remainingLine = '';
 			} else {
-				line = '';
+				yield {
+					eventType: "Unknown",
+					notes: ["Didn't recognize payload1: "+payload1],
+					sourceLine
+				}
+				remainingLine = '';
 			}
 			
-			yield {
-				hithere,
-				payload,
-			}
+			line = remainingLine;
 		}
 	}
 }
@@ -146,10 +228,20 @@ function collect<T>( source:Iterable<T> ) : T[] {
 }
 
 Deno.test('parseBluetoothCtlLine', () => {
-	const input = "\x1b[0;94m[bluetooth]\x1b[0m# [\x1b[0;93mCHG\x1b[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffca (-54)\n";
+	const sourceLine1 = "\x1b[0;94m[bluetooth]\x1b[0m# [\x1b[0;92mNEW\x1b[0m] Device 00:21:BD:D1:5C:A9 Nintendo RVL-WBC-01";
+	const sourceLine2 = "\x1b[0;94m[bluetooth]\x1b[0m# [\x1b[0;93mCHG\x1b[0m] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffca (-54)";
+	const input =
+		"\n" +
+		sourceLine1 + "\n" +
+		"# foo, garbage line\n" +
+		sourceLine2 + "\n" +
+		"# Blah more stuff\n";
 	//const input = "\u001b[0;94m[bluetooth]\u001b[0m#                         \r[\u001b[0;93mCHG\u001b[0m] Controller 40:F4:C9:6F:12:6D Pairable: yes"
 	const outputs = collect(parseBluetoothCtlLines(input));
-	assertEquals([{dev: "bluetooth", payload: "[CHG] Device 00:21:BD:D1:5C:A9 RSSI: 0xffffffca (-54)"}], outputs);
+	assertEquals(outputs, [
+		{eventType: "New"   , subjectType: "Device", subjectId: "00:21:BD:D1:5C:A9", subjectName: "Nintendo RVL-WBC-01", sourceLine: sourceLine1},
+		{eventType: "Change", subjectType: "Device", subjectId: "00:21:BD:D1:5C:A9", propertyName: "RSSI", value: "0xffffffca (-54)", sourceLine: sourceLine2},
+	]);
 });
 
 function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {

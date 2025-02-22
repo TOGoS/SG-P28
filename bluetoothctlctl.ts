@@ -2,50 +2,9 @@ import { assertEquals } from 'https://deno.land/std@0.165.0/testing/asserts.ts';
 import { toCommands, Token, toTokens } from './src/main/ts/CommandTokenizer.ts';
 import { decodeUtf8 } from './src/main/ts/streamiter.ts';
 import { toChunkIterator, toLines } from './src/main/ts/streamiter.ts';
-
-type ProcSig = Deno.Signal;
-type ProcStat = Deno.CommandStatus;
-type ProcessID = string;
-
-type ProcessLike = {
-	kill(sig: ProcSig): void;
-	readonly id    : ProcessID;
-	readonly name? : string;
-	wait() : Promise<number>;
-}
-
-const EXITCODE_ABORTED = 137; // 'I've been sigkilled'
-
-function absMax(a: number, b: number): number {
-	return Math.abs(a) > Math.abs(b) ? a : b;
-}
-function combineExitCodes(codes: number[]): number {
-	return codes.reduce(absMax, 0);
-}
-
-class ProcessGroup implements ProcessLike {
-	#children: ProcessLike[] = [];
-	#id : string;
-	constructor(opts : {children? : ProcessLike[], id?:string} = {}) {
-		this.#children = opts.children ?? [];
-		this.#id = opts.id ?? newPseudoPid();
-	}
-	kill(sig: Deno.Signal): void {
-		console.log(`# Killing process group ${this.#id} with signal ${sig}`);
-		for (const process of this.#children) {
-			console.log(`#   Killing child process ${process.id}${process.name ? ' ('+process.name+')' : ''} with signal ${sig}`);
-			process.kill(sig);
-		}
-	}
-	
-	wait() : Promise<number> {
-		return Promise.all(this.#children.map(child => child.wait())).then(combineExitCodes);
-	}
-	
-	get id(): string {
-		return this.id;
-	}
-}
+import ProcessLike from './src/main/ts/process/ProcessLike.ts';
+import { ProcessGroup } from './src/main/ts/process/ProcessGroup.ts';
+import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
 
 class DenoProcessLike implements ProcessLike {
 	#process: Deno.ChildProcess;
@@ -62,25 +21,6 @@ class DenoProcessLike implements ProcessLike {
 	}
 	get id(): string { return "sysproc:"+this.#process.pid; }
 	get name(): string { return this.#name; }
-}
-
-let nextPseudoPid = 0;
-
-function newPseudoPid() : string {
-	return "pseudoproc:"+(nextPseudoPid++).toString();
-}
-
-function functionToProcessLike(fn: (signal:AbortSignal) => Promise<number>, opts: {name?:string, id?:string} = {}): ProcessLike {
-	const id = opts.id ?? newPseudoPid();
-	const name = opts.name;
-	const controller = new AbortController();
-	const prom = fn(controller.signal);
-	return {
-		kill(sig: ProcSig) { controller.abort(sig); },
-		wait() { return prom; },
-		get id() { return id; },
-		get name() { return name; },
-	};
 }
 
 type SimpleCommand = {args: string[]};

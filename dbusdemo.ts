@@ -63,7 +63,7 @@ async function main() {
 		const unlockAdapter = await adapter.lock.aquire();
 		
 		const connector = new WBBConnector(adapter);
-				
+		
 		try {
 			await adapter.setPowered(true);
 			await adapter.startDiscovery();

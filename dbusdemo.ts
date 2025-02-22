@@ -1,5 +1,7 @@
-import { SystemDBus } from 'npm:@clebert/node-d-bus@1.0.0';
-import { Adapter } from 'npm:@clebert/node-bluez@1.0.0';
+import { DBus, SystemDBus } from 'npm:@clebert/node-d-bus@1.0.0';
+import { Adapter, Device } from 'npm:@clebert/node-bluez@1.0.0';
+
+import * as dbusTypes from 'npm:d-bus-type-system@1.0.0';
 
 // Based on code from https://github.com/clebert/node-bluez
 
@@ -7,6 +9,43 @@ function usleep(duration:number) : Promise<void> {
 	return new Promise((resolve,reject) => {
 		setTimeout(() => resolve(), duration);
 	});
+}
+
+class WBBConnector {
+	#adapter : Adapter;
+	#devices : Device[];
+	constructor(adapter : Adapter) {
+		this.#adapter = adapter;
+		this.#devices = [];
+	}
+	async connectTo(macAddr : string ) {
+		console.log("Waiting for device...");
+		let device = await this.#adapter.waitForDevice(macAddr);
+		
+		console.log("Device: ", device);
+		
+		//adapter.removeDevice(device);
+		await this.#adapter.callMethod('RemoveDevice', [dbusTypes.objectPathType], [device.objectPath]);
+		console.log("Device removed");
+		
+		console.log("Waiting for device again...");
+		device = await this.#adapter.waitForDevice(macAddr);
+		this.#devices.push(device);
+		
+		await device.setProperty('Trusted', dbusTypes.booleanType, true);
+		console.log("Set trusted!");
+		
+		await device.callMethod('Pair');
+		console.log("Device paired!");
+		
+		await device.callMethod("Connect");
+		console.log("Connected!");
+	}
+	close() {
+		for( const dev of this.#devices ) {
+			dev.disconnect();
+		}
+	}
 }
 
 async function main() {
@@ -23,30 +62,18 @@ async function main() {
 		
 		const unlockAdapter = await adapter.lock.aquire();
 		
-		let device;
-		
+		const connector = new WBBConnector(adapter);
+				
 		try {
 			await adapter.setPowered(true);
 			await adapter.startDiscovery();
 			
-			device = await adapter.waitForDevice('00:21:BD:D1:5C:A9');
-			
-			console.log("Device: ", device);
-			
-			await device.connect();
-			
-			console.log("Connected!");
-			
-			// This doesn't seem to quite do the job.
-			// No js* device shows up in /dev/input.
-			// After the remove/trust/pair/connect dance in bluetoothctl, it does show up.
-			// Goal is to do whatever bluetoothctl does.
-					
-			while( true ) {
-				await usleep(1000);
-			}
+			await connector.connectTo('00:21:BD:D1:5C:A9');
+			console.log("Woohoo, connected!");
+			await usleep(5000);
 		} finally {
-			if( device != null ) device.disconnect();
+			connector.close();
+			
 			unlockAdapter();
 		}
 	} finally {

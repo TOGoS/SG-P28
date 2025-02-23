@@ -5,6 +5,8 @@ import ProcessLike, { ProcSig } from './src/main/ts/process/ProcessLike.ts';
 import * as dbusTypes from 'npm:d-bus-type-system@1.0.0';
 import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
 import { ProcessGroup } from './src/main/ts/process/ProcessGroup.ts';
+import { toCommands, Token, toTokens } from './src/main/ts/CommandTokenizer.ts';
+import { decodeUtf8, toChunkIterator } from './src/main/ts/streamiter.ts';
 
 // Based on code from https://github.com/clebert/node-bluez
 
@@ -72,6 +74,8 @@ function startConnectLoop1(macAddr : string, con : ()=>Promise<Device> ) : Proce
 		while( !sig.aborted ) {
 			try {
 				const device = await con();
+				// Polling for now because idk how else to detect
+				// when the device has been disconnected
 				while( !sig.aborted && await device.isConnected() ) {
 					console.log(`${macAddr} still connected`);
 					await usleep(1000);
@@ -91,42 +95,108 @@ function startConnectLoop2(macAddr : string, connector : WBBConnector) : Process
 	return startConnectLoop1(macAddr, () => connector.connectTo(macAddr));
 }
 
+type SimpleCommand = {args: string[]};
 
-async function main() {
-	const dBus = new SystemDBus();
-	await dBus.connectAsExternal();
-
-	try {
-		await dBus.hello();
+function tokensToSimpleCommand(tokens:Token[]) : SimpleCommand {
+	return {
+		args: tokens.flatMap(tok => {
+			switch(tok.type) {
+			case "bareword":
+			case "quoted-string":
+				return [tok.value];
+			case 'newline':
+			case 'whitespace':
+			case 'comment':
+				return [];
+			default:
+				throw new Error(`Unrecognized token type: '${(tok as Token).type}'`);
+			}
+		})
+	}
+}
+function spawnThing() : ProcessLike {	
+	const processGroup = new ProcessGroup();
+	
+	processGroup.addChild(functionToProcessLike(async (sig) => {
+		const stdinReader = Deno.stdin.readable.getReader();
+		const stdinProcess = functionToProcessLike(async (signal) => {
+			signal.addEventListener("abort", () => stdinReader.cancel());
+	
+			for await (const command of toCommands(toTokens(decodeUtf8(toChunkIterator(stdinReader))))) {
+				if (signal.aborted) return 1;
+				
+				const cmd = tokensToSimpleCommand(command);
+				const cmdArgs = cmd.args;
+				
+				// A few different ways to quit:
+				// - `kill` will forcibly kill the group and should result in a nonzero exit code
+				// - `exit` (+ optional code) will close stdin and exit with the given code
+				
+				if( cmdArgs[0] === "kill" ) {
+					console.log("# Killing process group...");
+					processGroup.kill("SIGKILL");
+					break;
+				}
+				if( cmdArgs[0] == "exit" ) {
+					const code = cmdArgs.length > 1 ? +cmdArgs[1] : 0;
+					processGroup.exit(code);
+					break;
+				}
+				if( cmdArgs[0] == "echo" ) {
+					console.log(cmdArgs.slice(1).join(' '));
+					break;
+				}
+				
+				console.log(`Unrecognized command: '${cmdArgs[0]}'`);
+			}
+			processGroup.exit(0);
+			return 0;
+		}, {name: "stdin-piper"});
 		
-		const [adapter] = await Adapter.getAll(dBus);
-		if( !adapter ) {
-			throw new Error("No bluez adapter found");
-		}
+		processGroup.addChild(stdinProcess);
 		
-		const unlockAdapter = await adapter.lock.aquire();
+		const dBus = new SystemDBus();
+		await dBus.connectAsExternal();
 		
-		const connector = new WBBConnector(adapter);
+		sig.addEventListener("abort", _event => {
+			try {	dBus.disconnect(); } catch( _e ) { /* ignore */ }
+		});
 		
 		try {
-			await adapter.setPowered(true);
-			await adapter.startDiscovery();
+			await dBus.hello();
 			
-			startConnectLoop2('00:21:BD:D1:5C:A9', connector);
+			const [adapter] = await Adapter.getAll(dBus);
+			if( !adapter ) {
+				throw new Error("No bluez adapter found");
+			}
 			
+			const unlockAdapter = await adapter.lock.aquire();
 			
+			const connector = new WBBConnector(adapter);
+			processGroup.addChild(connector);
 			
-			await connector.wait();
+			try {
+				await adapter.setPowered(true);
+				await adapter.startDiscovery();
+				
+				processGroup.addChild(startConnectLoop2('00:21:BD:D1:5C:A9', connector));
+				
+				await connector.wait();
+			} finally {
+				connector.kill('SIGTERM');
+				
+				unlockAdapter();
+			}
 		} finally {
-			connector.kill('SIGTERM');
-			
-			unlockAdapter();
+			try { dBus.disconnect(); } catch( _e ) { /* ignore */ }
 		}
-	} finally {
-		dBus.disconnect();
-	}
+		
+		return 0;
+	}));
+	
+	return processGroup;
 }
 
 if (import.meta.main) {
-	await main();
+	Deno.exit(await spawnThing().wait());
 }

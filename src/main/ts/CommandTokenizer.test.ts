@@ -1,6 +1,12 @@
 import { Token, toTokens, toCommands } from './CommandTokenizer.ts';
 import { assertEquals } from "https://deno.land/std@0.165.0/testing/asserts.ts";
 
+async function collect<T>(iter:Iterable<T>|AsyncIterable<T>) : Promise<T[]> {
+	const arr = [];
+	for await( const item of iter ) arr.push(item);
+	return arr;
+}
+
 async function* asyncGenerator<T>(items: T[]): AsyncIterable<T> {
 	for (const item of items) {
 		yield item;
@@ -9,10 +15,7 @@ async function* asyncGenerator<T>(items: T[]): AsyncIterable<T> {
 
 Deno.test('toTokens with simple input', async () => {
 	const text = asyncGenerator(['hello world']);
-	const tokens = [];
-	for await (const token of toTokens(text)) {
-		tokens.push(token);
-	}
+	const tokens = await collect(toTokens(text));
 	
 	assertEquals(tokens, [
 		{ type: "bareword", value: "hello" },
@@ -23,10 +26,7 @@ Deno.test('toTokens with simple input', async () => {
 
 Deno.test('toTokens with quoted strings', async () => {
 	const text = asyncGenerator(['"hello world"']);
-	const tokens = [];
-	for await (const token of toTokens(text)) {
-		tokens.push(token);
-	}
+	const tokens = await collect(toTokens(text));
 	
 	assertEquals(tokens, [
 		{ type: "quoted-string", value: 'hello world' }
@@ -35,10 +35,7 @@ Deno.test('toTokens with quoted strings', async () => {
 
 Deno.test('toTokens with mixed input', async () => {
 	const text = asyncGenerator(['hello "world" # cement']);
-	const tokens = [];
-	for await (const token of toTokens(text)) {
-		tokens.push(token);
-	}
+	const tokens = await collect(toTokens(text));
 	
 	assertEquals(tokens, [
 		{ type: "bareword", value: "hello" },
@@ -51,10 +48,7 @@ Deno.test('toTokens with mixed input', async () => {
 
 Deno.test('toTokens with multi-chunk input', async () => {
 	const text = asyncGenerator(['hello ', '"world', '" # com', 'ment']);
-	const tokens = [];
-	for await (const token of toTokens(text)) {
-		tokens.push(token);
-	}
+	const tokens = await collect(toTokens(text));
 	
 	assertEquals(tokens, [
 		{ type: "bareword", value: "hello" },
@@ -68,10 +62,7 @@ Deno.test('toTokens with multi-chunk input', async () => {
 /*
 Deno.test('toTokens with incomplete token at end', async () => {
 	const text = asyncGenerator(['hello "world']);
-	const tokens = [];
-	for await (const token of toTokens(text)) {
-		tokens.push(token);
-	}
+	const tokens = await collect(toTokens(text));
 	
 	assertEquals(tokens, [
 		{ type: "bareword", value: "hello" },
@@ -83,10 +74,7 @@ Deno.test('toTokens with incomplete token at end', async () => {
 
 Deno.test('toTokens with newline tokens', async () => {
 	const text = asyncGenerator(['hello\nworld\n']);
-	const tokens = [];
-	for await (const token of toTokens(text)) {
-		tokens.push(token);
-	}
+	const tokens = await collect(toTokens(text));
 	
 	assertEquals(tokens, [
 		{ type: "bareword", value: "hello" },
@@ -103,10 +91,7 @@ Deno.test('toCommands with simple input', async () => {
 		{ type: "bareword", value: "world" },
 		{ type: "newline" }
 	]);
-	const commands = [];
-	for await (const command of toCommands(tokens)) {
-		commands.push(command);
-	}
+	const commands = await collect(toCommands(tokens));
 	
 	assertEquals(commands, [[
 		{ type: "bareword", value: "hello" },
@@ -126,10 +111,7 @@ Deno.test('toCommands with multiple commands', async () => {
 		{ type: "bareword", value: "bar" },
 		{ type: "newline" }
 	]);
-	const commands = [];
-	for await (const command of toCommands(tokens)) {
-		commands.push(command);
-	}
+	const commands = await collect(toCommands(tokens));
 	
 	assertEquals(commands, [
 		[
@@ -158,10 +140,7 @@ Deno.test('toCommands with comments and empty lines', async () => {
 		{ type: "bareword", value: "bar" },
 		{ type: "newline" }
 	]);
-	const commands = [];
-	for await (const command of toCommands(tokens)) {
-		commands.push(command);
-	}
+	const commands = await collect(toCommands(tokens));
 	
 	assertEquals(commands, [
 		[
@@ -183,10 +162,7 @@ Deno.test('toCommands with incomplete command at end', async () => {
 		{ type: "whitespace" },
 		{ type: "bareword", value: "world" }
 	]);
-	const commands = [];
-	for await (const command of toCommands(tokens)) {
-		commands.push(command);
-	}
+	const commands = await collect(toCommands(tokens));
 	
 	assertEquals(commands, [[
 		{ type: "bareword", value: "hello" },
@@ -208,10 +184,7 @@ Deno.test('toCommands with mixed input', async () => {
 		{ type: "quoted-string", value: 'bar' },
 		{ type: "newline" }
 	]);
-	const commands = [];
-	for await (const command of toCommands(tokens)) {
-		commands.push(command);
-	}
+	const commands = await collect(toCommands(tokens));
 	
 	assertEquals(commands, [
 		[

@@ -69,7 +69,7 @@ function tokenize(input:string, isEnd:boolean) : {tokens:Token[], remaining:stri
 	};
 }
 
-export async function* toTokens(text: AsyncIterable<string>): AsyncIterable<Token> {
+export async function* toTokens(text: Iterable<string>|AsyncIterable<string>): AsyncIterable<Token> {
 	let buffer = '';
 	for await (const chunk of text) {
 		buffer += chunk;

@@ -12,7 +12,10 @@ export class ProcessGroup implements ProcessLike {
 	addChild(process : ProcessLike) : void {
 		this.#children.push(process);
 	}
-	/** Kill the group, but then exit with the given code */
+	/**
+	 * Kill the group and all children, forcing the group to exit
+	 * with the specified code, regardless of child process exit codes.
+	 **/
 	exit(code : number): void {
 		this.#exitCode = code;
 		this.kill("SIGTERM");

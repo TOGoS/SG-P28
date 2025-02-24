@@ -1,10 +1,10 @@
 import { assertEquals } from 'https://deno.land/std@0.165.0/testing/asserts.ts';
-import { toCommands, Token, toTokens } from './src/main/ts/CommandTokenizer.ts';
 import { decodeUtf8 } from './src/main/ts/streamiter.ts';
 import { toChunkIterator, toLines } from './src/main/ts/streamiter.ts';
 import ProcessLike from './src/main/ts/process/ProcessLike.ts';
 import { ProcessGroup } from './src/main/ts/process/ProcessGroup.ts';
 import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
+import { chunksToSimpleCommands } from './src/main/ts/simplecommandparser.ts';
 
 class DenoProcessLike implements ProcessLike {
 	#process: Deno.ChildProcess;
@@ -24,24 +24,6 @@ class DenoProcessLike implements ProcessLike {
 }
 
 type SimpleCommand = {args: string[]};
-
-function tokensToSimpleCommand(tokens:Token[]) : SimpleCommand {
-	return {
-		args: tokens.flatMap(tok => {
-			switch(tok.type) {
-			case "bareword":
-			case "quoted-string":
-				return [tok.value];
-			case 'newline':
-			case 'whitespace':
-			case 'comment':
-				return [];
-			default:
-				throw new Error(`Unrecognized token type: '${(tok as Token).type}'`);
-			}
-		})
-	}
-}
 
 // This might be more complex than needed because the
 // weirdness is from bluetoothctl emitting two things at once
@@ -222,12 +204,9 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 		const encoder = new TextEncoder();
 		signal.addEventListener("abort", () => stdinReader.cancel());
 
-		for await (const command of toCommands(toTokens(decodeUtf8(toChunkIterator(stdinReader))))) {
+		for await (const cmdArgs of chunksToSimpleCommands(decodeUtf8(toChunkIterator(stdinReader)))) {
 			if (signal.aborted) return 1;
-			
-			const cmd = tokensToSimpleCommand(command);
-			const cmdArgs = cmd.args;
-			
+						
 			// A few different ways to quit:
 			// - `kill` will forcibly kill the group and should result in a nonzero exit code
 			// - `exit` will close stdin and should result in a zero exit code
@@ -265,7 +244,7 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 		// TODO: Parse bluetoothctl output!
 		
 		signal.addEventListener("abort", () => stdoutReader.cancel());
-		const stdoutLines = toLines(toChunkIterator(stdoutReader));
+		const stdoutLines = toLines(decodeUtf8(toChunkIterator(stdoutReader)));
 		for await (const line of stdoutLines) {
 			if (signal.aborted) return EXITCODE_ABORTED;
 			
@@ -278,7 +257,7 @@ function spawnBluetoothCtlCtl(args: string[]): ProcessGroup {
 	
 	const stderrProcess = functionToProcessLike(async (signal) => {
 		signal.addEventListener("abort", () => stderrReader.cancel());
-		const stderrLines = toLines(toChunkIterator(stderrReader));
+		const stderrLines = toLines(decodeUtf8(toChunkIterator(stderrReader)));
 		for await (const line of stderrLines) {
 			if (signal.aborted) return EXITCODE_ABORTED;
 			console.error(line);

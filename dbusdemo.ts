@@ -5,7 +5,7 @@ import ProcessLike, { ProcSig } from './src/main/ts/process/ProcessLike.ts';
 import * as dbusTypes from 'npm:d-bus-type-system@1.0.0';
 import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
 import { ProcessGroup } from './src/main/ts/process/ProcessGroup.ts';
-import { toCommands, Token, toTokens } from './src/main/ts/CommandTokenizer.ts';
+import { chunksToSimpleCommands } from './src/main/ts/simplecommandparser.ts';
 import { decodeUtf8, toChunkIterator } from './src/main/ts/streamiter.ts';
 
 // Based on code from https://github.com/clebert/node-bluez
@@ -97,23 +97,6 @@ function startConnectLoop2(macAddr : string, connector : WBBConnector) : Process
 
 type SimpleCommand = {args: string[]};
 
-function tokensToSimpleCommand(tokens:Token[]) : SimpleCommand {
-	return {
-		args: tokens.flatMap(tok => {
-			switch(tok.type) {
-			case "bareword":
-			case "quoted-string":
-				return [tok.value];
-			case 'newline':
-			case 'whitespace':
-			case 'comment':
-				return [];
-			default:
-				throw new Error(`Unrecognized token type: '${(tok as Token).type}'`);
-			}
-		})
-	}
-}
 function spawnThing() : ProcessLike {	
 	const processGroup = new ProcessGroup();
 	
@@ -121,36 +104,38 @@ function spawnThing() : ProcessLike {
 		const stdinReader = Deno.stdin.readable.getReader();
 		const stdinProcess = functionToProcessLike(async (signal) => {
 			signal.addEventListener("abort", () => stdinReader.cancel());
-	
-			for await (const command of toCommands(toTokens(decodeUtf8(toChunkIterator(stdinReader))))) {
+			
+			let exitMode : number|"SIGKILL" = 0;
+			for await (const cmdArgs of chunksToSimpleCommands(decodeUtf8(toChunkIterator(stdinReader)))) {
 				if (signal.aborted) return 1;
-				
-				const cmd = tokensToSimpleCommand(command);
-				const cmdArgs = cmd.args;
 				
 				// A few different ways to quit:
 				// - `kill` will forcibly kill the group and should result in a nonzero exit code
 				// - `exit` (+ optional code) will close stdin and exit with the given code
 				
 				if( cmdArgs[0] === "kill" ) {
-					console.log("# Killing process group...");
-					processGroup.kill("SIGKILL");
+					exitMode = "SIGKILL";
 					break;
-				}
-				if( cmdArgs[0] == "exit" ) {
-					const code = cmdArgs.length > 1 ? +cmdArgs[1] : 0;
-					processGroup.exit(code);
+				} else if( cmdArgs[0] == "exit" ) {
+					exitMode = cmdArgs.length > 1 ? +cmdArgs[1] : 0;
 					break;
-				}
-				if( cmdArgs[0] == "echo" ) {
+				} else if( cmdArgs[0] == "echo" ) {
 					console.log(cmdArgs.slice(1).join(' '));
-					break;
+				} else {
+					console.log(`Unrecognized command: '${cmdArgs[0]}'`);
 				}
-				
-				console.log(`Unrecognized command: '${cmdArgs[0]}'`);
 			}
-			processGroup.exit(0);
-			return 0;
+			console.log(`# stdin-reader: Reached end of command stream; exiting with code 0`);
+			if( exitMode == "SIGKILL" ) {
+				console.log("# Killing process group...");
+				processGroup.kill("SIGKILL");
+				return 1;
+			} else {
+				// Force process group to exit with the given code,
+				// regardless of how child processes exit:
+				processGroup.exit(exitMode);
+				return exitMode;
+			}
 		}, {name: "stdin-piper"});
 		
 		processGroup.addChild(stdinProcess);
@@ -198,5 +183,7 @@ function spawnThing() : ProcessLike {
 }
 
 if (import.meta.main) {
-	Deno.exit(await spawnThing().wait());
+	const exitCode = await spawnThing().wait();
+	console.log(`# dbusdemo: exiting with code ${exitCode}`);
+	Deno.exit(exitCode);
 }

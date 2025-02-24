@@ -31,11 +31,10 @@ export async function* toFixedSizeChunks(chunkSize : number, chunks : AsyncItera
 	}
 }
 
-export async function* toLines(chunks: AsyncIterable<Uint8Array>): AsyncIterable<string> {
-	const decoder = new TextDecoder();
+export async function* toLines(chunks: Iterable<string>|AsyncIterable<string>): AsyncIterable<string> {
 	let buffer = "";
 	for await (const chunk of chunks) {
-		buffer += decoder.decode(chunk, { stream: true });
+		buffer += chunk;
 		const lines = buffer.split("\n");
 		buffer = lines.pop()!;
 		for (const line of lines) {

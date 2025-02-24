@@ -41,7 +41,7 @@ Deno.test('toFixedSizeChunks', async () => {
 Deno.test('toLines', async () => {
 	const chunks = asyncGenerator([new Uint8Array([97, 98, 99, 10, 100, 101, 102, 10, 103, 104, 105])]);
 	const lines = [];
-	for await (const line of toLines(chunks)) {
+	for await (const line of toLines(decodeUtf8(chunks))) {
 		lines.push(line);
 	}
 

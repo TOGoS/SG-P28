@@ -1,3 +1,0 @@
-#!/bin/bash
-
-exec deno run --check=all --allow-env --allow-sys --allow-read --allow-write dbusdemo.ts

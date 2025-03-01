@@ -300,6 +300,18 @@ class WBBConnectorV2 extends ProcessGroup {
 						this.inputEventDeviceAppeared(path);
 					}
 				}
+			} else if( evt.kind == "remove" ) {
+				for( const path of evt.paths ) {
+					for( const devKey in this.#deviceStates ) {
+						const devState = this.#deviceStates[devKey];
+						if( devState.devicePathGuess == path ) {
+							// Un-guess it!
+							devState.devicePathGuess = undefined;
+							// Maybe it's disconnected too, but let the other
+							// process take care of that.
+						}
+					}
+				}
 			}
 		}));
 		

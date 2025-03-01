@@ -28,10 +28,18 @@ export class ProcessGroup implements ProcessLike {
 		}
 	}
 	
-	wait() : Promise<number> {
-		return Promise.all(this.#children.map(child => child.wait())).then(childExitCodes => {
+	/*
+	 * May be overridden to clean up any additional resources this
+	 * process group holds after all children have exited, and before wait() returns.
+	 */
+	dispose() : Promise<void> { return Promise.resolve(); }
+	
+	async wait() : Promise<number> {
+		const code = await Promise.all(this.#children.map(child => child.wait())).then(childExitCodes => {
 			return this.#exitCode ?? combineExitCodes(childExitCodes);
 		})
+		await this.dispose();
+		return code;
 	}
 	
 	get id(): string {

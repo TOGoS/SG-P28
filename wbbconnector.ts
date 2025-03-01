@@ -410,10 +410,11 @@ class WBBConnectorV2 extends ProcessGroup {
 	}
 }
 
-async function spawnWbbConnectorV2() : Promise<ProcessLike> {
+async function spawnWbbConnectorV2(args:string[]) : Promise<ProcessLike> {
 	const mang = new WBBConnectorV2();
-	mang.addDevice('00:21:BD:D1:5C:A9');
-	mang.addDevice('58:BD:A3:AC:20:AD');
+	for( const macAddress of args ) {
+		mang.addDevice(macAddress);
+	}
 	await mang.start();
 	// Hmm.  Need a way to chain ProcessLikes like promises;
 	// 'starting' should be part of the process, not a separate step!
@@ -429,7 +430,7 @@ function spawn(args:string[]) : ProcessLike|Promise<ProcessLike> {
 	} else if( args[0] == "v1" ) {
 		return spawnWbbConnectorV1();
 	} else if( args[0] == "v2" ) {
-		return spawnWbbConnectorV2();
+		return spawnWbbConnectorV2(args.slice(1));
 	} else {
 		return functionToProcessLike(async (_sig) => {
 			console.error(`Unrecognized command: '${args[0]}'`);

@@ -1,0 +1,6 @@
+#!/bin/bash
+
+exec deno run --check=all --allow-env --allow-sys --allow-read --allow-write wbbconnector.ts v2 \
+	'00:21:BD:D1:5C:A9' \
+	'58:BD:A3:AC:20:AD' \
+	"$@"

@@ -10,6 +10,13 @@ import { decodeUtf8, toChunkIterator } from './src/main/ts/streamiter.ts';
 
 class DeviceNotAvailable extends Error { }
 type Milliseconds = number;
+type FilePath = string;
+
+function usleep(duration:number) : Promise<void> {
+	return new Promise((resolve,reject) => {
+		setTimeout(() => resolve(), duration);
+	});
+}
 
 async function waitForDeviceOrAbort(
 	adapter      : Adapter,
@@ -96,13 +103,7 @@ async function attemptToConnect(
 	return device;
 }
 
-type FilePath = string;
-
-function usleep(duration:number) : Promise<void> {
-	return new Promise((resolve,reject) => {
-		setTimeout(() => resolve(), duration);
-	});
-}
+//// v1 stuff
 
 class WBBConnectorV1 implements ProcessLike {
 	name = "wbb-connector-v1";
@@ -258,6 +259,8 @@ function spawnWbbConnectorV1() : ProcessLike {
 	
 	return processGroup;
 }
+
+//// v2 stuff
 
 function spawnFsWatcher(path:FilePath, onEvent: (event: Deno.FsEvent) => void) : ProcessLike {
 	return functionToProcessLike(async sig => {
@@ -444,6 +447,8 @@ function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 	}
 	return new PromisedProcessLike( mang.start().then(() => mang) );
 }
+
+//// entrypoint stuff
 
 function spawn(args:string[]) : ProcessLike {
 	if( args.length == 0 ) {

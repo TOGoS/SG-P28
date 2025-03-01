@@ -302,6 +302,10 @@ class WBBConnectorV2 extends ProcessGroup {
 		return super.kill(sig);
 	}
 	
+	/**
+	 * Continually poll device states and attempt to connect the unconnected,
+	 * and update the status of those that may have become disconnected.
+	 */
 	async btConnectionLoop(sig:AbortSignal) : Promise<number> {
 		const adapter = this.#adapter;
 		if( !adapter ) throw new Error("Adapter not initialized!");
@@ -413,6 +417,10 @@ class WBBConnectorV2 extends ProcessGroup {
 	}
 }
 
+/**
+ * Wraps a Promise<ProcessLike> in order
+ * to treat the whole chain as a single ProcessLike.
+ */
 class PromisedProcessLike implements ProcessLike {
 	// Hmm: But wouldn't it be neat if each stage could either
 	// return another ProcessLike, or maybe even a list of them

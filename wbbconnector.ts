@@ -9,6 +9,21 @@ import { chunksToSimpleCommands } from './src/main/ts/simplecommandparser.ts';
 import { decodeUtf8, toChunkIterator } from './src/main/ts/streamiter.ts';
 
 class DeviceNotAvailable extends Error { }
+type Milliseconds = number;
+
+async function waitForDeviceOrAbort(
+	adapter      : Adapter,
+	macAddress   : string,
+	abortSignal  : AbortSignal,
+	pollInterval : Milliseconds = 100
+) : Promise<Device|undefined> {
+	while( !abortSignal.aborted ) {
+		const [device] = await adapter.getDevices(macAddress);
+		if( device != undefined ) return device;
+		await usleep(pollInterval);
+	}
+	return undefined;
+}
 
 async function attemptToConnect(
 	adapter     : Adapter,
@@ -16,11 +31,24 @@ async function attemptToConnect(
 	abortSignal : AbortSignal,
 	log         : (message:string) => void
 ) : Promise<Device> {
-	log("Waiting for device...");
+	let device : Device|undefined;
+	
 	// let device = await adapter.waitForDevice(macAddress);
-	let [device] = await adapter.getDevices(macAddress);
+	
+	log(`Getting device for ${macAddress}...`);
+	[device] = await adapter.getDevices(macAddress);
 	if( device == undefined ) {
+		log(`getDevices(${macAddress}) returned no device`);
 		throw new DeviceNotAvailable(`${macAddress} not present`);
+	}
+	
+	log(`Checking if ${macAddress} is already connected...`);
+	const alreadyConnected = await device.isConnected();
+	if( alreadyConnected ) {
+		log(`${macAddress} already connected!  Skipping the remove/trust/pair dance`);
+		return device;
+	} else {
+		log(`${macAddress} is *not* already connected; we must dance`);
 	}
 	
 	function checkAbort() {
@@ -35,7 +63,13 @@ async function attemptToConnect(
 	log(`${macAddress} removed`);
 	
 	log(`Waiting for ${macAddress} again...`);
-	device = await adapter.waitForDevice(macAddress);
+	
+	const reconnectTimeout = 5000;
+	device = await waitForDeviceOrAbort(adapter, macAddress, AbortSignal.any([abortSignal, AbortSignal.timeout(reconnectTimeout)]));
+	if( device == null ) {
+		log(`After ${reconnectTimeout}ms, ${macAddress} never showed up`);
+		throw new DeviceNotAvailable();
+	}
 	
 	await device.setProperty('Trusted', dbusTypes.booleanType, true);
 	checkAbort();

@@ -28,10 +28,16 @@ async function waitForDeviceOrAbort(
 async function attemptToConnect(
 	adapter     : Adapter,
 	macAddress  : string,
-	abortSignal : AbortSignal,
-	log         : (message:string) => void
+	opts: {
+		forceDance?  : boolean,
+		abortSignal? : AbortSignal,
+		log?         : (message:string) => void
+	} = {}
 ) : Promise<Device> {
 	let device : Device|undefined;
+	
+	const log = opts.log ?? (() => {});
+	const abortSignal = opts.abortSignal ?? AbortSignal.any([]);
 	
 	// let device = await adapter.waitForDevice(macAddress);
 	
@@ -45,8 +51,12 @@ async function attemptToConnect(
 	log(`Checking if ${macAddress} is already connected...`);
 	const alreadyConnected = await device.isConnected();
 	if( alreadyConnected ) {
-		log(`${macAddress} already connected!  Skipping the remove/trust/pair dance`);
-		return device;
+		if( opts.forceDance ) {
+			log(`${macAddress} already connected, but we MUST DANCE ANYWAY`);
+		} else {
+			log(`${macAddress} already connected!  Skipping the remove/trust/pair dance`);
+			return device;
+		}
 	} else {
 		log(`${macAddress} is *not* already connected; we must dance`);
 	}
@@ -98,16 +108,15 @@ class WBBConnectorV1 implements ProcessLike {
 	name = "wbb-connector-v1";
 	#adapter : Adapter;
 	#devices : Device[];
-	#abortSignal : AbortSignal;
-	#abortController : AbortController;
+	#abortController : AbortController = new AbortController();
+	#abortSignal : AbortSignal = this.#abortController.signal;
 	#done : Promise<number>;
 	#id : string;
+	#attemptToConnectOpts;
 	constructor(adapter : Adapter, opts : {id?:string} = {}) {
 		this.#id = opts.id || newPseudoPid();
 		this.#adapter = adapter;
 		this.#devices = [];
-		this.#abortController = new AbortController();
-		this.#abortSignal = this.#abortController.signal;
 		this.#done = new Promise((resolve,reject) => {
 			this.#abortSignal.addEventListener('abort', () => {
 				for( const dev of this.#devices ) {
@@ -116,12 +125,15 @@ class WBBConnectorV1 implements ProcessLike {
 				resolve(EXITCODE_ABORTED);
 			});
 		});
+		this.#attemptToConnectOpts = {
+			log: (msg:string) => console.log(`# attemptToConnect: ${msg}`),
+			abortSignal: this.#abortSignal,
+		};
 	}
 	connectTo(macAddr : string ) : Promise<Device> {
 		return attemptToConnect(
 			this.#adapter, macAddr,
-			this.#abortSignal,
-			msg => console.log(`# attemptToConnect: ${msg}`)
+			
 		);
 	}
 	
@@ -271,6 +283,11 @@ class WBBConnectorV2 extends ProcessGroup {
 	#abortController : AbortController = new AbortController();
 	#abortSignal : AbortSignal = this.#abortController.signal;
 	#deviceStates : {[mac:string]: WBBState} = {};
+	#attemptToConnectOpts = {
+		forceDance: true, // Otherwise we can't match it up with a /dev/input/whatever!
+		abortSignal: this.#abortSignal,
+		log: (msg:string) => this.log(`attemptToConnect: ${msg}`)
+	}
 	
 	constructor() {
 		super();
@@ -296,8 +313,8 @@ class WBBConnectorV2 extends ProcessGroup {
 					// TODO: timeout after, like, 20 seconds idk
 					try {
 						devState.bluezDevice = await attemptToConnect(
-							adapter, devState.macAddress, sig,
-							msg => this.log(`attemptToConnect: ${msg}`)
+							adapter, devState.macAddress,
+							this.#attemptToConnectOpts
 						);
 						devState.status = "connected";
 						await usleep(1000); // Give /dev/input/event a chance to show up before we start connecting another

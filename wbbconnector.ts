@@ -410,18 +410,42 @@ class WBBConnectorV2 extends ProcessGroup {
 	}
 }
 
-async function spawnWbbConnectorV2(args:string[]) : Promise<ProcessLike> {
+class PromisedProcessLike implements ProcessLike {
+	// Hmm: But wouldn't it be neat if each stage could either
+	// return another ProcessLike, or maybe even a list of them
+	// to be run in parallel, or an exit code?
+	// 
+	// (This would be a similar design to TScript34-P0020's FunctionalReactiveProcessLike,
+	// which can emit output, exit, or yield a new one).
+	// 
+	// Maybe I could make TaskLike which is more like a cancellable
+	// Promise<ThreadLike|number>.
+	#prom : Promise<ProcessLike>;
+	id    : string;
+	name? : string;
+	constructor(prom:Promise<ProcessLike>, opts:{id?:string, name?:string}={}) {
+		this.#prom = prom;
+		this.id = opts.id ?? newPseudoPid();
+		this.name = opts.name;
+	}
+	kill(sig: ProcSig): void {
+		// Deliver it as soon as the process is available!
+		this.#prom.then(pl => pl.kill(sig));
+	}
+	wait(): Promise<number> {
+		return this.#prom.then(pl => pl.wait());
+	}
+}
+
+function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 	const mang = new WBBConnectorV2();
 	for( const macAddress of args ) {
 		mang.addDevice(macAddress);
 	}
-	await mang.start();
-	// Hmm.  Need a way to chain ProcessLikes like promises;
-	// 'starting' should be part of the process, not a separate step!
-	return mang;
+	return new PromisedProcessLike( mang.start().then(() => mang) );
 }
 
-function spawn(args:string[]) : ProcessLike|Promise<ProcessLike> {
+function spawn(args:string[]) : ProcessLike {
 	if( args.length == 0 ) {
 		return functionToProcessLike(async (_sig) => {
 			console.error("Plz say thing or thang");

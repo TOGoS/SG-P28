@@ -7,16 +7,11 @@ import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/mai
 import { ProcessGroup } from './src/main/ts/process/ProcessGroup.ts';
 import { chunksToSimpleCommands } from './src/main/ts/simplecommandparser.ts';
 import { decodeUtf8, toChunkIterator } from './src/main/ts/streamiter.ts';
+import { usleep } from './usleep.ts';
 
 class DeviceNotAvailable extends Error { }
 type Milliseconds = number;
 type FilePath = string;
-
-function usleep(duration:number) : Promise<void> {
-	return new Promise((resolve,reject) => {
-		setTimeout(() => resolve(), duration);
-	});
-}
 
 async function waitForDeviceOrAbort(
 	adapter      : Adapter,

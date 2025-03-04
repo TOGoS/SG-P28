@@ -1,7 +1,7 @@
 /// <reference lib="Deno.window"/>
 
 import { toChunkIterator, toFixedSizeChunks } from "./src/main/ts/streamiter.ts";
-import InputEvent, { EV_ABS, ABS_HAT0X, ABS_HAT0Y, ABS_HAT1X, ABS_HAT1Y, EVENT_SIZE, decodeInputEvent } from './src/main/ts/InputEvent.ts';
+import InputEvent, { EVENT_SIZE, decodeInputEvent } from './src/main/ts/InputEvent.ts';
 
 //// First order of business: turn ReadableStreams into async iterators to make them easier to deal with:
 
@@ -13,97 +13,14 @@ import InputEvent, { EV_ABS, ABS_HAT0X, ABS_HAT0Y, ABS_HAT1X, ABS_HAT1Y, EVENT_S
 
 import { Message as OSCMessage } from "https://deno.land/x/osc@v0.1.0/mod.ts";
 import { delay } from "https://deno.land/std@0.224.0/async/delay.ts";
-import { assertEquals } from "https://deno.land/std@0.165.0/testing/asserts.ts";
+import { UDPSink } from "./src/main/ts/sink/UDPSink.ts";
+import { OSCSink } from "./src/main/ts/sink/OSCSink.ts";
+import { MultiSink } from "./src/main/ts/sink/MultiSink.ts";
+import { InputEventToOSCSink } from "./src/main/ts/sink/InputEventToOSCSink.ts";
+import { uint8ArrayToHex } from "./src/main/ts/uint8ArrayToHex.ts";
+import { leftPad } from "./src/main/ts/leftPad.ts";
 
-interface Consumer<T> {
-	accept(item:T) : void;
-}
-
-class UDPSink implements Consumer<Uint8Array> {
-	#conn : Deno.DatagramConn;
-	#target : Deno.Addr;
-	#debug : Consumer<string>;
-	constructor(conn:Deno.DatagramConn, target:Deno.Addr, debug?:Consumer<string>) {
-		this.#conn = conn;
-		this.#target = target;
-		this.#debug = debug || { accept(t) { } };
-	}
-	accept(data:Uint8Array) {
-		this.#debug.accept(`Attempting to send ${data.length} bytes to ${JSON.stringify(this.#target)}: ${uint8ArrayToHex(data)}`);
-		this.#conn.send(data, this.#target);
-	}
-}
-
-class OSCSink implements Consumer<OSCMessage> {
-	#sink : Consumer<Uint8Array>;
-	constructor(sink : Consumer<Uint8Array>) {
-		this.#sink = sink;
-	}
-	accept(msg:OSCMessage) {
-		this.#sink.accept(msg.marshal());
-	}
-}
-
-class MultiSink<T> implements Consumer<T> {
-	#subs : Consumer<T>[];
-	constructor(subs : Consumer<T>[] ) {
-		this.#subs = subs;
-	}
-	accept(item: T): void {
-		for( const sub of this.#subs ) {
-			sub.accept(item);
-		}
-	}
-}
-
-const chanStats = new Map<string,number>();
-
-class InputEventToOSCSink implements Consumer<InputEvent> {
-	#oscSink : Consumer<OSCMessage>;
-	#path : string;
-	constructor(oscSink : Consumer<OSCMessage>, path:string) {
-		this.#oscSink = oscSink;
-		this.#path = path;
-	}
-	accept(event: InputEvent): void {
-		if( event.type == EV_ABS ) {
-			let weightIdx = -1;
-			switch( event.code ) {
-			case ABS_HAT0X: weightIdx = 0; break;
-			case ABS_HAT1X: weightIdx = 1; break;
-			case ABS_HAT0Y: weightIdx = 2; break;
-			case ABS_HAT1Y: weightIdx = 3; break;
-			}
-			if( weightIdx >= 0 ) {
-				// this.weights[weightIdx] = event.value;
-				const destPath = this.#path+"/"+weightIdx;
-				chanStats.set(destPath, (chanStats.get(destPath) || 0)+1);
-				this.#oscSink.accept(new OSCMessage(destPath).append(event.value));
-			}
-		}
-	}
-}
-
-function uint8ArrayToHex(data:Uint8Array) : string {
-	const hexes = [];
-	for( const b of data ) hexes.push(((b >> 4) & 0x0F).toString(16) + (b & 0x0F).toString(16));
-	return hexes.join('');
-}
-
-function leftPad(template:string, insertMe:string) {
-	const diff = template.length - insertMe.length;
-	if( insertMe.length > template.length ) return insertMe.substring(-diff);
-	return template.substring(0, diff) + insertMe;
-}
-
-Deno.test({
-	name: "leftPad with zero-length template",
-	fn() { assertEquals("", leftPad("", "anything")); }
-});
-Deno.test({
-	name: "leftPad something reasonable",
-	fn() { assertEquals("horsemaster", leftPad("horseHELLO!", "master")); }
-});
+export const chanStats = new Map<string,number>();
 
 const paths : string[] = [];
 const targetSpecs : string[] = [];
@@ -156,7 +73,7 @@ for( const targetSpec of targetSpecs ) {
 			accept(item:OSCMessage) {
 				console.log(`osc-packet ${uint8ArrayToHex(item.marshal())}`)
 			}
-		}, path));
+		}, path, chanStats));
 	} else if( (m = OSCUDP_TARGET_REGEX.exec(targetSpec)) !== null ) {
 		// 'bracketedhostname' is to support IPv6 addresses in URIs, like http://[fe80::9908:15:1bb5:39db%18]:1234/some-path
 		// Possibly parsing should be stricter.
@@ -184,7 +101,7 @@ for( const targetSpec of targetSpecs ) {
 		);
 		const oscSink = new OSCSink(udpSink);
 		eventSinks.push(
-			new InputEventToOSCSink(oscSink, path)
+			new InputEventToOSCSink(oscSink, path, chanStats)
 		);
 	} else {
 		throw new Error(`Unrecognized target spec: '${targetSpec}'`);

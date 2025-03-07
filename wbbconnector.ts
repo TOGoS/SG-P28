@@ -265,6 +265,7 @@ function spawnWbbConnectorV1() : ProcessLike {
 async function readEvents(
 	eventDevPath : FilePath,
 	opts: {
+		littleEndian?: boolean,
 		onEvent      : (evt:InputEvent)=>void,
 		abortSignal? : AbortSignal,
 		log?         : (msg:string)=>void
@@ -273,9 +274,21 @@ async function readEvents(
 	const onEvent = opts.onEvent;
 	const abortSignal = opts.abortSignal;
 	const log = opts.log;
-	const instream = await Deno.open(eventDevPath, { read: true });
-	const inreadable = instream.readable.getReader();
-	const littleEndian = true;
+	let instream;
+	try {
+		instream = await Deno.open(eventDevPath, { read: true });
+	} catch( error ) {
+		if(log) log(`Error opening ${eventDevPath}: ${error}`);
+		return 1;
+	}
+	let inreadable;
+	try {
+		inreadable = instream.readable.getReader();
+	} catch( error ) {
+		if(log) log(`Error getting reader for ${eventDevPath}: ${error}`);
+		return 1;
+	}
+	const littleEndian = opts.littleEndian ?? true;
 	try {
 		let eventCount = 0;
 		let byteCount = 0;
@@ -540,7 +553,7 @@ function makeUdpOscSink(
 		port
 	};
 	
-	console.log(`# makeUdpOscSink: ${JSON.stringify({localHostname, localPort, path, udpTarget})}`);
+	if(log) log(`# makeUdpOscSink: ${JSON.stringify({localHostname, localPort, path, udpTarget})}`);
 	
 	function sendUdp(packet:Uint8Array) {
 		if( packet == undefined ) {
@@ -554,7 +567,7 @@ function makeUdpOscSink(
 		if(log) log(`sendUdp: Sent UDP packet to ${JSON.stringify(udpTarget)}: ${uint8ArrayToHex(packet)}`);
 	}
 	
-	console.log(`# makeUdpOscSink: Sending test packet...`);
+	if(log) log(`makeUdpOscSink: Sending test packet...`);
 	function sendOsc(msg:OSCMessage) {
 		const packet : Uint8Array = msg.marshal();
 		sendUdp(packet);
@@ -572,7 +585,7 @@ function makeUdpOscSink(
 			case inev.ABS_HAT0Y: weightIdx = 2; break;
 			case inev.ABS_HAT1Y: weightIdx = 3; break;
 			default:
-				console.log(`# udpOscSink: Unknown ABS event: ${JSON.stringify(inputEvent)}`);
+				if(log) log(`udpOscSink: Unknown ABS event: ${JSON.stringify(inputEvent)}`);
 			}
 			if (weightIdx >= 0) {
 				// this.weights[weightIdx] = event.value;
@@ -582,6 +595,11 @@ function makeUdpOscSink(
 					log(`sendUdp: Sent OSC message to ${destPath}: ${inputEvent.value}`);
 				}
 			}
+		} else {
+			// Hitting the button on the front seems to send:
+			// {"type":1,"code":304,"value":1}
+			// {"type":1,"code":304,"value":0}
+			if(log) log(`udpOscSink: Unknown event type: ${JSON.stringify(inputEvent)}`);
 		}
 	}
 }

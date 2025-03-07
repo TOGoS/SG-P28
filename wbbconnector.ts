@@ -6,8 +6,11 @@ import * as dbusTypes from 'npm:d-bus-type-system@1.0.0';
 import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
 import { ProcessGroup } from './src/main/ts/process/ProcessGroup.ts';
 import { chunksToSimpleCommands } from './src/main/ts/simplecommandparser.ts';
-import { decodeUtf8, toChunkIterator } from './src/main/ts/streamiter.ts';
-import { usleep } from './usleep.ts';
+import { decodeUtf8, toChunkIterator, toFixedSizeChunks } from './src/main/ts/streamiter.ts';
+import { usleep } from './src/main/ts/usleep.ts';
+import InputEvent, { decodeInputEvent, EVENT_SIZE } from './src/main/ts/InputEvent.ts';
+import { Consumer } from './src/main/ts/sink/Consumer.ts';
+import { leftPad } from './src/main/ts/leftPad.ts';
 
 class DeviceNotAvailable extends Error { }
 type Milliseconds = number;
@@ -257,6 +260,30 @@ function spawnWbbConnectorV1() : ProcessLike {
 
 //// v2 stuff
 
+async function readEvents(eventDevPath:FilePath, onEvent:(evt:InputEvent)=>void, abortSignal:AbortSignal) : Promise<number> {
+	const instream = await Deno.open(eventDevPath, { read: true });
+	const inreadable = instream.readable.getReader();
+	const littleEndian = true;
+	try {
+		let eventCount = 0;
+		let byteCount = 0;
+		for await(const chunk of toFixedSizeChunks(EVENT_SIZE, toChunkIterator(inreadable))) {
+			if( abortSignal.aborted ) return 1;
+			byteCount += chunk.length;
+			eventCount += 1;
+			const dataView = new DataView(chunk.buffer, 0, chunk.byteLength);
+			const event = decodeInputEvent(dataView, littleEndian);
+			//console.log(`Event: ${JSON.stringify(event)}`);
+			onEvent(event);
+		}
+		console.log(`Read ${byteCount} bytes, and ${eventCount} events`);
+	} finally {
+		inreadable.cancel();
+		return 1;
+	}
+	return 0;
+}
+
 function spawnFsWatcher(path:FilePath, onEvent: (event: Deno.FsEvent) => void) : ProcessLike {
 	return functionToProcessLike(async sig => {
 		const watcher = Deno.watchFs("/dev/input");
@@ -267,10 +294,11 @@ function spawnFsWatcher(path:FilePath, onEvent: (event: Deno.FsEvent) => void) :
 }
 
 interface WBBState {
-	macAddress: string,
-	bluezDevice?: Device,
-	status?: "disconnected"|"connecting"|"connected",
-	devicePathGuess?: FilePath,
+	macAddress: string;
+	bluezDevice?: Device;
+	status?: "disconnected"|"connecting"|"connected";
+	devicePathGuess?: FilePath;
+	reader?: ProcessLike;
 }
 
 class WBBConnectorV2 extends ProcessGroup {
@@ -281,14 +309,16 @@ class WBBConnectorV2 extends ProcessGroup {
 	#abortController : AbortController = new AbortController();
 	#abortSignal : AbortSignal = this.#abortController.signal;
 	#deviceStates : {[mac:string]: WBBState} = {};
+	#onEvent : (macAddr:string, evt:InputEvent) => void;
 	#attemptToConnectOpts = {
 		forceDance: true, // Otherwise we can't match it up with a /dev/input/whatever!
 		abortSignal: this.#abortSignal,
 		log: (msg:string) => this.log(`attemptToConnect: ${msg}`)
 	}
 	
-	constructor() {
-		super();
+	constructor(opts:{onEvent:(macAddr:string, evt:InputEvent)=>void, id?:string}) {
+		super(opts);
+		this.#onEvent = opts.onEvent;
 		this.#dBus = new SystemDBus();
 	}
 	
@@ -306,7 +336,7 @@ class WBBConnectorV2 extends ProcessGroup {
 		if( !adapter ) throw new Error("Adapter not initialized!");
 		while( !sig.aborted ) {
 			// Continually loop over devices attempting to connect to them
-			for( let devKey in this.#deviceStates ) {
+			for( const devKey in this.#deviceStates ) {
 				if( sig.aborted ) return EXITCODE_ABORTED;
 				
 				const devState = this.#deviceStates[devKey];
@@ -332,6 +362,15 @@ class WBBConnectorV2 extends ProcessGroup {
 					} else if( !await devState.bluezDevice.isConnected() ) {
 						devState.status = "disconnected";
 					}
+				}
+				
+				const devicePath = devState.devicePathGuess
+				if( devState.status == "connected" && devicePath != undefined && devState.reader == undefined ) {
+					const onEvent = (evt:InputEvent) => (this.#onEvent)(devKey, evt);
+					devState.reader = functionToProcessLike(
+						sig => readEvents(devicePath, onEvent, sig),
+						{name: `oscify-${devKey}-${devState.devicePathGuess}`}
+					);
 				}
 			}
 			await usleep(1000);
@@ -444,7 +483,11 @@ class PromisedProcessLike implements ProcessLike {
 }
 
 function spawnWbbConnectorV2(args:string[]) : ProcessLike {
-	const mang = new WBBConnectorV2();
+	const mang = new WBBConnectorV2({
+		onEvent: (macAddr, evt) => {
+			console.log(`# wbbconnector: ${macAddr}: ${JSON.stringify(evt)}`);
+		}
+	});
 	for( const macAddress of args ) {
 		mang.addDevice(macAddress);
 	}

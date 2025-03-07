@@ -122,7 +122,7 @@ if( eventSinks.length == 0 ) {
 const textEncoder = new TextEncoder();
 
 do {
-		for( const eventDevPath of paths ) {
+	for( const eventDevPath of paths ) {
 		const instream = await Deno.open(eventDevPath, { read: true });
 		const inreadable = instream.readable.getReader();
 		try {

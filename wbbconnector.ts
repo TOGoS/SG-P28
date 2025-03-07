@@ -274,8 +274,10 @@ async function readEvents(
 	const onEvent = opts.onEvent;
 	const abortSignal = opts.abortSignal;
 	const log = opts.log;
+	
 	let instream;
 	try {
+		if(log) log(`Opening '${eventDevPath}'...`);
 		instream = await Deno.open(eventDevPath, { read: true });
 	} catch( error ) {
 		if(log) log(`Error opening ${eventDevPath}: ${error}`);
@@ -303,21 +305,33 @@ async function readEvents(
 		}
 		if(log) log(`Read ${byteCount} bytes, and ${eventCount} events`);
 	} catch( error ) {
-		if(log) log(`Caught error: ${error}`);
+		if(log) log(`Caught error: ${JSON.stringify(error)}`);
 		return 1;
 	} finally {
+		//if(log) log(`Cancelling inreadable...`);
 		try { inreadable.cancel(); } catch ( _e ) { /* ignore */ }
+		//if(log) log(`Cancelled inreadable`);
 	}
 	return 0;
 }
 
-function spawnFsWatcher(path:FilePath, onEvent: (event: Deno.FsEvent) => void) : ProcessLike {
+function spawnFsWatcher(
+	path:FilePath,
+	onEvent: (event: Deno.FsEvent) => void,
+	log?:(msg:string)=>void
+) : ProcessLike {
 	return functionToProcessLike(async sig => {
-		const watcher = Deno.watchFs("/dev/input");
+		const watcher = Deno.watchFs(path);
 		sig.addEventListener('abort', () => watcher.close());
 		for await (const event of watcher) onEvent(event);
 		return 0;
-	}, {name: "fs-watcher"});
+	}, {
+		name: "fs-watcher",
+		onError: (e) => {
+			if(log) log(`Error in fs watcher of '${path}': ${e}`);
+			return 1;
+		}
+	});
 }
 
 interface WBBState {
@@ -394,16 +408,17 @@ class WBBConnectorV2 extends ProcessGroup {
 				const devicePath = devState.devicePathGuess
 				if( devState.status == "connected" && devicePath != undefined && devState.reader == undefined ) {
 					const onEvent = (evt:InputEvent) => (this.#onEvent)(devKey, evt);
+					const reLog = (msg:string) => this.log(`readEvents(${devicePath}): ${msg}`);
 					const readerProc = functionToProcessLike(
 						sig => readEvents(devicePath, {
 							onEvent,
 							abortSignal: sig,
-							log: msg => this.log(`readEvents(${devicePath}): ${msg}`)
+							log: reLog
 						}),
 						{name: `oscify-${devKey}-${devState.devicePathGuess}`}
 					);
 					readerProc.wait().then(exitCode => {
-						this.log(`readEvents(${devicePath}) exited with code ${exitCode}; removing`);
+						reLog(`exited with code ${exitCode}; removing`);
 						devState.reader = undefined;
 					});
 					devState.reader = readerProc;
@@ -457,7 +472,13 @@ class WBBConnectorV2 extends ProcessGroup {
 		this.#unlockAdapter = await this.#adapter.lock.aquire();
 		
 		this.log(`Starting btConnectionLoop...`);
-		this.addChild(functionToProcessLike(this.btConnectionLoop.bind(this), {name:"connector"}));
+		this.addChild(functionToProcessLike(this.btConnectionLoop.bind(this), {
+			name:"connector",
+			onError: (e) => {
+				this.log(`btConnectionLoop threw: ${e}`);
+				return 1;
+			}
+		}));
 		
 		await this.#adapter.setPowered(true);
 		await this.#adapter.startDiscovery();

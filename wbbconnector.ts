@@ -262,7 +262,17 @@ function spawnWbbConnectorV1() : ProcessLike {
 
 //// v2 stuff
 
-async function readEvents(eventDevPath:FilePath, onEvent:(evt:InputEvent)=>void, abortSignal:AbortSignal) : Promise<number> {
+async function readEvents(
+	eventDevPath : FilePath,
+	opts: {
+		onEvent      : (evt:InputEvent)=>void,
+		abortSignal? : AbortSignal,
+		log?         : (msg:string)=>void
+	}
+) : Promise<number> {
+	const onEvent = opts.onEvent;
+	const abortSignal = opts.abortSignal;
+	const log = opts.log;
 	const instream = await Deno.open(eventDevPath, { read: true });
 	const inreadable = instream.readable.getReader();
 	const littleEndian = true;
@@ -270,7 +280,7 @@ async function readEvents(eventDevPath:FilePath, onEvent:(evt:InputEvent)=>void,
 		let eventCount = 0;
 		let byteCount = 0;
 		for await(const chunk of toFixedSizeChunks(inev.EVENT_SIZE, toChunkIterator(inreadable))) {
-			if( abortSignal.aborted ) return 1;
+			if( abortSignal && abortSignal.aborted ) return 1;
 			byteCount += chunk.length;
 			eventCount += 1;
 			const dataView = new DataView(chunk.buffer, 0, chunk.byteLength);
@@ -278,10 +288,12 @@ async function readEvents(eventDevPath:FilePath, onEvent:(evt:InputEvent)=>void,
 			//console.log(`Event: ${JSON.stringify(event)}`);
 			onEvent(event);
 		}
-		console.log(`Read ${byteCount} bytes, and ${eventCount} events`);
-	} finally {
-		inreadable.cancel();
+		if(log) log(`Read ${byteCount} bytes, and ${eventCount} events`);
+	} catch( error ) {
+		if(log) log(`Caught error: ${error}`);
 		return 1;
+	} finally {
+		try { inreadable.cancel(); } catch ( _e ) { /* ignore */ }
 	}
 	return 0;
 }
@@ -369,10 +381,19 @@ class WBBConnectorV2 extends ProcessGroup {
 				const devicePath = devState.devicePathGuess
 				if( devState.status == "connected" && devicePath != undefined && devState.reader == undefined ) {
 					const onEvent = (evt:InputEvent) => (this.#onEvent)(devKey, evt);
-					devState.reader = functionToProcessLike(
-						sig => readEvents(devicePath, onEvent, sig),
+					const readerProc = functionToProcessLike(
+						sig => readEvents(devicePath, {
+							onEvent,
+							abortSignal: sig,
+							log: msg => this.log(`readEvents(${devicePath}): ${msg}`)
+						}),
 						{name: `oscify-${devKey}-${devState.devicePathGuess}`}
 					);
+					readerProc.wait().then(exitCode => {
+						this.log(`readEvents(${devicePath}) exited with code ${exitCode}; removing`);
+						devState.reader = undefined;
+					});
+					devState.reader = readerProc;
 				}
 			}
 			await usleep(1000);

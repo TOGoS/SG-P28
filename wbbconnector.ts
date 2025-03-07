@@ -1,16 +1,18 @@
-import { DBus, SystemDBus } from 'npm:@clebert/node-d-bus@1.0.0';
-import { Adapter, Device } from 'npm:@clebert/node-bluez@1.0.0';
-import ProcessLike, { ProcSig } from './src/main/ts/process/ProcessLike.ts';
+/// <reference lib="Deno.window"/>
 
-import * as dbusTypes from 'npm:d-bus-type-system@1.0.0';
-import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
+import ProcessLike, { ProcSig } from './src/main/ts/process/ProcessLike.ts';
 import { ProcessGroup } from './src/main/ts/process/ProcessGroup.ts';
 import { chunksToSimpleCommands } from './src/main/ts/simplecommandparser.ts';
 import { decodeUtf8, toChunkIterator, toFixedSizeChunks } from './src/main/ts/streamiter.ts';
 import { usleep } from './src/main/ts/usleep.ts';
-import InputEvent, { decodeInputEvent, EVENT_SIZE } from './src/main/ts/InputEvent.ts';
-import { Consumer } from './src/main/ts/sink/Consumer.ts';
-import { leftPad } from './src/main/ts/leftPad.ts';
+import InputEvent, { decodeInputEvent } from './src/main/ts/InputEvent.ts';
+import * as inev from './src/main/ts/InputEvent.ts';
+import { SystemDBus } from 'npm:@clebert/node-d-bus@1.0.0';
+import * as dbusTypes from 'npm:d-bus-type-system@1.0.0';
+import { Adapter, Device } from 'npm:@clebert/node-bluez@1.0.0';
+import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
+import OSCMessage from "./src/main/ts/osc/Message.ts";
+import { uint8ArrayToHex } from './src/main/ts/uint8ArrayToHex.ts';
 
 class DeviceNotAvailable extends Error { }
 type Milliseconds = number;
@@ -267,7 +269,7 @@ async function readEvents(eventDevPath:FilePath, onEvent:(evt:InputEvent)=>void,
 	try {
 		let eventCount = 0;
 		let byteCount = 0;
-		for await(const chunk of toFixedSizeChunks(EVENT_SIZE, toChunkIterator(inreadable))) {
+		for await(const chunk of toFixedSizeChunks(inev.EVENT_SIZE, toChunkIterator(inreadable))) {
 			if( abortSignal.aborted ) return 1;
 			byteCount += chunk.length;
 			eventCount += 1;
@@ -482,13 +484,134 @@ class PromisedProcessLike implements ProcessLike {
 	}
 }
 
+const OSCUDP_TARGET_REGEX = new RegExp(
+	"^osc\\+udp://" +
+	"(?:\\[(?<bracketedhostname>[^\\]]+)\\]|(?<hostname>[^:]+))" +
+	":(?<port>\\d+)" +
+	"(?:;localhost=(?<localhost>[^;\\/]+))?" +
+	"(?:;debug=(?<debug>on|off))?" +
+	"(?<path>/.*)$"
+);
+
+const DEFAULT_LOCAL_HOSTNAME = "0.0.0.0";
+
+interface WBBEvent {
+	wbbMacAddress: string;
+	inputEvent: InputEvent;
+}
+
+function makeUdpOscSink(
+	hostname:string, port:number, path:string,
+	opts:{
+		localHostname?:string,
+		localPort?:number,
+		log?:(msg:string)=>void
+	}={}
+) : (evt:WBBEvent)=>void {
+	const log = opts.log;
+	const localHostname = opts?.localHostname || DEFAULT_LOCAL_HOSTNAME;
+	const localPort = opts?.localPort || port-1;
+	
+	const udpConn   : Deno.DatagramConn = Deno.listenDatagram({transport: "udp", port: localPort, hostname: localHostname })
+	const udpTarget : Deno.Addr = {
+		transport: "udp",
+		hostname,
+		port
+	};
+	
+	console.log(`# makeUdpOscSink: ${JSON.stringify({localHostname, localPort, path, udpTarget})}`);
+	
+	function sendUdp(packet:Uint8Array) {
+		if( packet == undefined ) {
+			if(log) log(`sendUdp: Attempted to send undefined packet`);
+			return;
+		} else if( packet.length == 0 ) {
+			if(log) log(`sendUdp: Attempted to send empty packet`);
+			return;
+		}
+		udpConn.send(packet, udpTarget);
+		if(log) log(`sendUdp: Sent UDP packet to ${JSON.stringify(udpTarget)}: ${uint8ArrayToHex(packet)}`);
+	}
+	
+	console.log(`# makeUdpOscSink: Sending test packet...`);
+	function sendOsc(msg:OSCMessage) {
+		const packet : Uint8Array = msg.marshal();
+		sendUdp(packet);
+	}
+	
+	sendOsc(new OSCMessage("/test").append("hello"));
+	
+	return (evt:WBBEvent) => {
+		const inputEvent = evt.inputEvent;
+		if (inputEvent.type == inev.EV_ABS) {
+			let weightIdx = -1;
+			switch (inputEvent.code) {
+			case inev.ABS_HAT0X: weightIdx = 0; break;
+			case inev.ABS_HAT1X: weightIdx = 1; break;
+			case inev.ABS_HAT0Y: weightIdx = 2; break;
+			case inev.ABS_HAT1Y: weightIdx = 3; break;
+			default:
+				console.log(`# udpOscSink: Unknown ABS event: ${JSON.stringify(inputEvent)}`);
+			}
+			if (weightIdx >= 0) {
+				// this.weights[weightIdx] = event.value;
+				const destPath = path + "/" + evt.wbbMacAddress + "/" + weightIdx;
+				sendOsc(new OSCMessage(destPath).append(inputEvent.value));
+				if( log ) {
+					log(`sendUdp: Sent OSC message to ${destPath}: ${inputEvent.value}`);
+				}
+			}
+		}
+	}
+}
+
+function parseWbbEventTarget(spec:string) : (wbbEvent:WBBEvent)=>void {
+	let m : RegExpExecArray|null;
+	if( (m = OSCUDP_TARGET_REGEX.exec(spec)) !== null ) {
+		const hostname : string = m.groups!["hostname"] || m.groups!["bracketedhostname"];
+		const port : number = +m.groups!["port"];
+		const path : string = m.groups!["path"];
+		// TODO: If localhost not explicitly specified, determine whether this will need to use IPv4 or IPv6
+		// and create the listenDatagram using the corresponding localhost address.
+		// Otherwise you might get
+		// 'Error: An address incompatible with the requested protocol was used. (os error 10047)'
+		const localHostname = m.groups!["localhost"] || DEFAULT_LOCAL_HOSTNAME;
+		const debugging = (m.groups!["debug"] || "off") == "on";
+		const log = debugging ? ((m:string) => console.log(`# target: ${m}`)) : undefined;
+		return makeUdpOscSink(hostname, port, path, {localHostname, log});
+	} else {
+		throw new Error(`Unrecognized target spec: '${spec}'`);
+	}
+}
+
 function spawnWbbConnectorV2(args:string[]) : ProcessLike {
+	const deviceMacRe = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+	
+	const deviceMacAddresses = [];
+	const sinks : ((wbbEvent:WBBEvent)=>void)[] = [];
+	
+	for( const arg of args ) {
+		let m : RegExpExecArray|null;
+		if( (m = /^--target=(.*)/.exec(arg)) !== null ) {
+			sinks.push(parseWbbEventTarget(m[1]));
+		} else if( (m = deviceMacRe.exec(arg)) !== null ) {
+			deviceMacAddresses.push(m[0]);
+		} else {
+			return functionToProcessLike((_sig) => {
+				console.error(`Unrecognized argument: ${arg}`);
+				return Promise.resolve(1);
+			});
+		}
+	}
+	
 	const mang = new WBBConnectorV2({
 		onEvent: (macAddr, evt) => {
-			console.log(`# wbbconnector: ${macAddr}: ${JSON.stringify(evt)}`);
+			for( const sink of sinks ) {
+				sink({wbbMacAddress: macAddr, inputEvent: evt});
+			}
 		}
 	});
-	for( const macAddress of args ) {
+	for( const macAddress of deviceMacAddresses ) {
 		mang.addDevice(macAddress);
 	}
 	return new PromisedProcessLike( mang.start().then(() => mang) );

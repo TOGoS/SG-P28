@@ -11,7 +11,7 @@ import InputEvent, { EVENT_SIZE, decodeInputEvent } from './src/main/ts/InputEve
 // Note: Could use a more general-purpose Danducer-based parser system, but meh,
 // Consumer<T> is probably good enough for starters.
 
-import { Message as OSCMessage } from "https://deno.land/x/osc@v0.1.0/mod.ts";
+import OSCMessage from "./src/main/ts/osc/Message.ts";
 import { delay } from "https://deno.land/std@0.224.0/async/delay.ts";
 import { UDPSink } from "./src/main/ts/sink/UDPSink.ts";
 import { OSCSink } from "./src/main/ts/sink/OSCSink.ts";

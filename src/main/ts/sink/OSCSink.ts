@@ -1,4 +1,4 @@
-import { Message as OSCMessage } from "https://deno.land/x/osc@v0.1.0/mod.ts";
+import OSCMessage from "../osc/Message.ts";
 import { Consumer } from "./Consumer.ts";
 
 export class OSCSink implements Consumer<OSCMessage> {

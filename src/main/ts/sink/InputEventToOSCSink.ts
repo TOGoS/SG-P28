@@ -1,4 +1,4 @@
-import { Message as OSCMessage } from "https://deno.land/x/osc@v0.1.0/mod.ts";
+import OSCMessage from "../osc/Message.ts";
 import { Consumer } from "./Consumer.ts";
 import InputEvent, { EV_ABS, ABS_HAT0X, ABS_HAT1X, ABS_HAT0Y, ABS_HAT1Y } from "../InputEvent.ts";
 

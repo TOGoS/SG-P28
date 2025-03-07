@@ -13,3 +13,9 @@ Planned features:
 - Automatically detect new boards as they are added
 - Some board identification routine
   (maybe you step on each board in order).
+
+## FAQ
+
+### I get Permission Denied errors when I try to read from /dev/input/eventN devices!
+
+Maybe try `usermod -a -G input $your_username`.

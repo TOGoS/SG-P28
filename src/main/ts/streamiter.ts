@@ -57,7 +57,7 @@ function join(a:Uint8Array, b:Uint8Array) : Uint8Array {
 
 export async function* decodeUtf8(chunks: AsyncIterable<Uint8Array>): AsyncIterable<string> {
 	const decoder = new TextDecoder("utf-8", { fatal: true });
-	let buffer : Uint8Array<ArrayBufferLike> = new Uint8Array(0);
+	let buffer : Uint8Array = new Uint8Array(0);
 	
 	for await( const chunk of chunks ) {
 		const combined = join(buffer, chunk);

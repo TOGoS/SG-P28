@@ -19,6 +19,7 @@ import { MultiSink } from "./src/main/ts/sink/MultiSink.ts";
 import { InputEventToOSCSink } from "./src/main/ts/sink/InputEventToOSCSink.ts";
 import { uint8ArrayToHex } from "./src/main/ts/uint8ArrayToHex.ts";
 import { leftPad } from "./src/main/ts/leftPad.ts";
+import { parseTargetSpec } from "./src/main/ts/sink/sinkspec.ts";
 
 export const chanStats = new Map<string,number>();
 
@@ -49,59 +50,39 @@ for( const arg of Deno.args ) {
 	}
 }
 
-const OSCUDP_TARGET_REGEX = new RegExp(
-	"^osc\\+udp://" +
-	"(?:\\[(?<bracketedhostname>[^\\]]+)\\]|(?<hostname>[^:]+))" +
-	":(?<port>\\d+)" +
-	"(?:;localhost=(?<localhost>[^;\\/]+))?" +
-	"(?:;debug=(?<debug>on|off))?" +
-	"(?<path>/.*)$"
-);
-
 const eventSinks = [];
 for( const targetSpec of targetSpecs ) {
-	let m : RegExpExecArray|null;
-	if( "debug" == targetSpec ) {
+	const target = parseTargetSpec(targetSpec);
+	if (target.type === "Debug") {
 		eventSinks.push({
-			accept(item:InputEvent) {
+			accept(item: InputEvent) {
 				console.log(`input-event type=${item.type} code=${item.code} value=${item.value}`);
 			}
-		})
-	} else if( (m = /^osc\+debug:(?<path>\/.*)$/.exec(targetSpec)) !== null ) {
-		const path : string = m.groups!["path"];
+		});
+	} else if (target.type === "OSC+Debug") {
 		eventSinks.push(new InputEventToOSCSink({
-			accept(item:OSCMessage) {
-				console.log(`osc-packet ${uint8ArrayToHex(item.marshal())}`)
+			accept(item: OSCMessage) {
+				console.log(`osc-packet ${uint8ArrayToHex(item.marshal())}`);
 			}
-		}, path, chanStats));
-	} else if( (m = OSCUDP_TARGET_REGEX.exec(targetSpec)) !== null ) {
-		// 'bracketedhostname' is to support IPv6 addresses in URIs, like http://[fe80::9908:15:1bb5:39db%18]:1234/some-path
-		// Possibly parsing should be stricter.
-		const hostname : string = m.groups!["hostname"] || m.groups!["bracketedhostname"];
-		const port : number = +m.groups!["port"];
-		const path : string = m.groups!["path"];
-		// TODO: If localhost not explicitly specified, determine whether this will need to use IPv4 or IPv6
-		// and create the listenDatagram using the corresponding localhost address.
-		// Otherwise you might get
-		// 'Error: An address incompatible with the requested protocol was used. (os error 10047)'
-		const localHostname = m.groups!["localhost"] || "localhost";
-		const debugging = (m.groups!["debug"] || "off") == "on";
-		// TODO: Allow local port to be overridden, pick one at random,
-		// nd/or pass the allow reuse flag, if that's a thing
+		}, target.path, chanStats));
+	} else if (target.type === "OSC+UDP") {
+		const localHostname = target.localHostname ?? "localhost";
+		const localPort = target.localPort ?? Math.random() * 65535 | 0;
+		console.log(`Using udp://${target.localHostname ?? "localhost"}:${localPort} as local port`);
 		const udpSink = new UDPSink(
-			Deno.listenDatagram({transport: "udp", port: port-1, hostname: localHostname }),
+			Deno.listenDatagram({ transport: "udp", port: localPort, hostname: localHostname }),
 			{
 				transport: "udp",
-				hostname,
-				port
+				hostname: target.targetHostname,
+				port: target.targetPort
 			},
-			debugging ? {
-				accept(text:string) { console.log("udpSink: "+text); }
+			target.debugging ? {
+				accept(text: string) { console.log("udpSink: " + text); }
 			} : undefined
 		);
 		const oscSink = new OSCSink(udpSink);
 		eventSinks.push(
-			new InputEventToOSCSink(oscSink, path, chanStats)
+			new InputEventToOSCSink(oscSink, target.path, chanStats)
 		);
 	} else {
 		throw new Error(`Unrecognized target spec: '${targetSpec}'`);

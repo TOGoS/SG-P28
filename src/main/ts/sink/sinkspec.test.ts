@@ -24,6 +24,20 @@ Deno.test("parse simplest target spec osc+udp", () => {
 });
 
 Deno.test("parse target spec osc+udp with localhost and debug on", () => {
+	const target : TargetSpec = parseTargetSpec("osc+udp://192.168.9.234:1234;localhost=192.168.9.233:1233;debug=on/some/path");
+	const expected : TargetSpec = {
+		type: "OSC+UDP",
+		targetHostname: "192.168.9.234",
+		targetPort: 1234,
+		localHostname: "192.168.9.233",
+		localPort: 1233,
+		path: "/some/path",
+		debugging: true,
+	};
+	assertEquals(target, expected);
+});
+
+Deno.test("parse target spec osc+udp with localhost and debug on", () => {
 	const target : TargetSpec = parseTargetSpec("osc+udp://foo.com:1234;localhost=[0::0]:1235;debug=on/some/path");
 	const expected : TargetSpec = {
 		type: "OSC+UDP",

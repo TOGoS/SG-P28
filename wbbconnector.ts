@@ -2,16 +2,11 @@
 
 import ProcessLike, { ProcSig } from './src/main/ts/process/ProcessLike.ts';
 import { ProcessGroup } from './src/main/ts/process/ProcessGroup.ts';
-import { chunksToSimpleCommands } from './src/main/ts/simplecommandparser.ts';
-import { decodeUtf8, toChunkIterator } from './src/main/ts/streamiter.ts';
 import { usleep } from './src/main/ts/usleep.ts';
-import * as inev from './src/main/ts/InputEvent.ts';
 import { SystemDBus } from 'npm:@clebert/node-d-bus@1.0.0';
 import * as dbusTypes from 'npm:d-bus-type-system@1.0.0';
 import { Adapter, Device } from 'npm:@clebert/node-bluez@1.0.0';
 import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
-import OSCMessage from "./src/main/ts/osc/Message.ts";
-import { uint8ArrayToHex } from './src/main/ts/uint8ArrayToHex.ts';
 
 class DeviceNotAvailable extends Error { }
 type Milliseconds = number;
@@ -164,100 +159,8 @@ function startConnectLoop1(macAddr : string, con : ()=>Promise<Device> ) : Proce
 	});
 }
 
-function startConnectLoop2(macAddr : string, connector : WBBConnectorV1) : ProcessLike {
-	return startConnectLoop1(macAddr, () => connector.connectTo(macAddr));
-}
 
 type SimpleCommand = {args: string[]};
-
-function spawnWbbConnectorV1() : ProcessLike {
-	const processGroup = new ProcessGroup();
-	
-	processGroup.addChild(functionToProcessLike(async (sig) => {
-		const selfName = "wbb-connector-spawner-v1";
-		
-		const stdinReader = Deno.stdin.readable.getReader();
-		const stdinProcess = functionToProcessLike(async (signal) => {
-			signal.addEventListener("abort", () => stdinReader.cancel());
-			
-			let exitMode : number|"SIGKILL" = 0;
-			for await (const cmdArgs of chunksToSimpleCommands(decodeUtf8(toChunkIterator(stdinReader)))) {
-				if (signal.aborted) return 1;
-				
-				// A few different ways to quit:
-				// - `kill` will forcibly kill the group and should result in a nonzero exit code
-				// - `exit` (+ optional code) will close stdin and exit with the given code
-				
-				if( cmdArgs[0] === "kill" ) {
-					exitMode = "SIGKILL";
-					break;
-				} else if( cmdArgs[0] == "exit" ) {
-					exitMode = cmdArgs.length > 1 ? +cmdArgs[1] : 0;
-					break;
-				} else if( cmdArgs[0] == "echo" ) {
-					console.log(cmdArgs.slice(1).join(' '));
-				} else {
-					console.log(`Unrecognized command: '${cmdArgs[0]}'`);
-				}
-			}
-			console.log(`# stdin-reader: Reached end of command stream; exiting with code 0`);
-			if( exitMode == "SIGKILL" ) {
-				console.log("# Killing process group...");
-				processGroup.kill("SIGKILL");
-				return 1;
-			} else {
-				// Force process group to exit with the given code,
-				// regardless of how child processes exit:
-				processGroup.exit(exitMode);
-				return exitMode;
-			}
-		}, {name: "stdin-piper"});
-		
-		processGroup.addChild(stdinProcess);
-		
-		const dBus = new SystemDBus();
-		await dBus.connectAsExternal();
-		
-		sig.addEventListener("abort", _event => {
-			try { dBus.disconnect(); } catch( _e ) { /* ignore */ }
-		});
-		
-		try {
-			await dBus.hello();
-			
-			console.log(`# ${selfName}: Getting adapter...`);
-			const [adapter] = await Adapter.getAll(dBus);
-			if( !adapter ) {
-				throw new Error("No bluez adapter found");
-			}
-			
-			console.log(`# ${selfName}: Acquiring adapter lock...`);
-			const unlockAdapter = await adapter.lock.aquire();
-			
-			const connector = new WBBConnectorV1(adapter);
-			processGroup.addChild(connector);
-			
-			try {
-				await adapter.setPowered(true);
-				await adapter.startDiscovery();
-				
-				processGroup.addChild(startConnectLoop2('00:21:BD:D1:5C:A9', connector));
-				
-				await connector.wait();
-			} finally {
-				connector.kill('SIGTERM');
-				
-				unlockAdapter();
-			}
-		} finally {
-			try { dBus.disconnect(); } catch( _e ) { /* ignore */ }
-		}
-		
-		return 0;
-	}));
-	
-	return processGroup;
-}
 
 //// v2 stuff
 
@@ -495,8 +398,6 @@ function spawn(args:string[]) : ProcessLike {
 			console.error("Plz say thing or thang");
 			return Promise.resolve(1);
 		});
-	} else if( args[0] == "v1" ) {
-		return spawnWbbConnectorV1();
 	} else if( args[0] == "v2" ) {
 		return spawnWbbConnectorV2(args.slice(1));
 	} else {

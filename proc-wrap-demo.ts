@@ -1,3 +1,4 @@
+import DenoProcessLike from './src/main/ts/process/DenoProcessLike.ts';
 import ProcessLike from './src/main/ts/process/ProcessLike.ts'
 
 interface TopicPath {
@@ -44,7 +45,7 @@ async function* mqttishMessagesToChunks(chunks:AsyncIterable<MQTTishMessage>) : 
 	}
 }
 
-/// TODO: Spawn an OS process, pipe i/o to our own
+/// DONE Spawn an OS process, pipe output to our own
 
 const textEncoder = new TextEncoder();
 function nonClosing<T>(writer:{
@@ -97,7 +98,7 @@ if( import.meta.main ) {
 	});
 }
 
-/// DONE one that also reads from stdin
+/// DONE spawn one that also reads from stdin
 
 function demoCatCommandIoPiping(io:ConventionalIOConfig) : Promise<number> {
 	console.log(`## ${demoCatCommandIoPiping.name}`)
@@ -122,5 +123,39 @@ if( import.meta.main ) {
 	});
 }
 
-/// TODO: Again, but model as a protoprocess
+/// DONE Again, but model as a protoprocess
 
+function spawn(argv:string[], io:ConventionalIOConfig) {
+	const cmd = new Deno.Command(argv[0], {
+		args: argv.slice(1),
+		stdin : "piped",
+		stdout: "piped",
+		stderr: "piped",
+	});
+	const proc = cmd.spawn();
+	const ioPromise = Promise.all([
+		io.stdin.pipeTo(proc.stdin),
+		proc.stdout.pipeTo(io.stdout),
+		proc.stderr.pipeTo(io.stderr),
+	]).then( () => {} );
+	return new DenoProcessLike(proc, {
+		cleanup: () => ioPromise
+	});
+}
+
+function demoCatCommandIoPipingProtoProcessly(io:ConventionalIOConfig) {
+	console.log(`## ${demoCatCommandIoPipingProtoProcessly.name}`)
+	
+	const protoProcess : ProtoProcess<ConventionalIOConfig> = io => spawn(["cat"], io);
+		
+	const proc = protoProcess(io);
+	return proc.wait();
+}
+
+if( import.meta.main ) {
+	await demoCatCommandIoPipingProtoProcessly({
+		stdin : ReadableStream.from([textEncoder.encode("Hello, demo cat!\n")]),
+		stdout: nonClosing(outWriter),
+		stderr: nonClosing(errWriter),
+	});
+}

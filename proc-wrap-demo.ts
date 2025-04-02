@@ -159,3 +159,32 @@ if( import.meta.main ) {
 		stderr: nonClosing(errWriter),
 	});
 }
+
+//// TODO ProtoProcessly spawn a process whose inputs and outputs are filtered
+
+// This may require rethinking how IOs are abstracted (or not).
+// Why pass in io instead of getting back an object that has its own IOs
+// (which might then need to be redundantly piped)?
+// 
+// Options:
+// - Don't; just deal with writable stdins and readable stdouts directly
+// - Define a network, then spawn that; spawner abstracts the details
+// - IO configs have ports that abstract over the readable/writable distinction
+//   (in the case of writers that are used directly to output)
+
+// Abstract 'ports', purposely designed to look and act
+// like Readable/Writable streams:
+
+interface ProtoProcess2InputPort<T> {
+	getWriter() : WritableStreamDefaultWriter<T>;
+}
+
+interface ProtoProcess2OutputPort<T> {
+	pipeTo(writable:ProtoProcess2InputPort<T>) : void;
+	getReader() : ReadableStreamDefaultReader<T>;
+}
+
+interface ProtoProcess2 {
+	getInputPort(portNum:number) : ProtoProcess2InputPort<Uint8Array>;
+	getOutputPort(portNum:number) : ProtoProcess2OutputPort<Uint8Array>;
+}

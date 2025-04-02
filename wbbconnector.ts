@@ -125,6 +125,11 @@ interface WBBState {
 	devicePathGuess?: FilePath;
 }
 
+interface Logger {
+	info(message:string) : void;
+	update(topic:string, payload:string) : void;
+}
+
 class WBBConnectorV2 extends ProcessGroup {
 	#dBus : SystemDBus;
 	#adapter? : Adapter;
@@ -133,14 +138,19 @@ class WBBConnectorV2 extends ProcessGroup {
 	#abortController : AbortController = new AbortController();
 	#abortSignal : AbortSignal = this.#abortController.signal;
 	#deviceStates : {[mac:string]: WBBState} = {};
+	#logger : Logger;
 	#attemptToConnectOpts = {
 		forceDance: true, // Otherwise we can't match it up with a /dev/input/whatever!
 		abortSignal: this.#abortSignal,
 		log: (msg:string) => this.log(`attemptToConnect: ${msg}`)
 	}
 	
-	constructor(opts:{id?:string}={}) {
+	constructor(opts:{id?:string, logger?:Logger}={}) {
 		super(opts);
+		this.#logger = opts.logger ?? {
+			info() { },
+			update(_topic, _payload) { },
+		}
 		this.#dBus = new SystemDBus();
 	}
 	
@@ -192,7 +202,7 @@ class WBBConnectorV2 extends ProcessGroup {
 	}
 	
 	log(msg:string) {
-		console.log(`# ${this.name}: ${msg}`);
+		this.#logger.info(msg);
 	}
 	
 	async start() : Promise<void> {
@@ -301,6 +311,16 @@ class PromisedProcessLike implements ProcessLike {
 	}
 }
 
+import { Mqtt, MqttClient } from 'jsr:@ymjacky/mqtt5@0.0.19';
+const textEncoder = new TextEncoder();
+
+function mkPromiseChain<T>(subject:T) : (action:(subject:T) => Promise<unknown>) => void {
+	let queue : Promise<unknown> = Promise.resolve();
+	return (action:(subject:T) => Promise<unknown>) => {
+		queue = queue.then(() => action(subject));
+	};
+}
+
 function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 	const deviceMacRe = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 	
@@ -318,11 +338,46 @@ function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 		}
 	}
 	
-	const mang = new WBBConnectorV2();
+	const topicPrefix = "wbbconnector";
+		
+	// TODO: MQTT server, and whether to use it at all,
+	// or something else, or both, should be configurable!
+	const mqttThen = mkPromiseChain(new MqttClient({
+		url: new URL('mqtt://localhost:1883'),
+		// clientId: 'clientA',
+		// username: 'userA',
+		// password: 'passwordA',
+		// logger: logger,
+		clean: true,
+		protocolVersion: Mqtt.ProtocolVersion.MQTT_V3_1_1,
+		keepAlive: 30,	
+	}));
+	const statusTopic = `${topicPrefix}/status`;
+	const chatTopic = `${topicPrefix}/chat`;
+			
+	mqttThen(client => client.connect({
+		will: {
+			topic: statusTopic,
+			payload: textEncoder.encode("offline"),
+		}
+	}));
+	mqttThen(client => client.publish(statusTopic, "online", {
+		retain: true
+	}));
+	const logger : Logger = {
+		info: (text) => mqttThen(client => client.publish(chatTopic, textEncoder.encode(text))),
+		update: (topic, payload) => mqttThen(client => client.publish(topic, textEncoder.encode(payload))),
+	};
+	
+	const mang = new WBBConnectorV2({
+		logger
+	});
 	for( const macAddress of deviceMacAddresses ) {
 		mang.addDevice(macAddress);
 	}
-	return new PromisedProcessLike( mang.start().then(() => mang) );
+	// TODO: Somehow register mqtt client (or whatever)
+	// with mang to close it on kill() and wait for it on wait().
+	return new PromisedProcessLike(mang.start().then(() => mang));
 }
 
 //// entrypoint stuff
@@ -330,7 +385,7 @@ function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 function spawn(args:string[]) : ProcessLike {
 	if( args.length == 0 ) {
 		return functionToProcessLike((_sig) => {
-			console.error("Plz say thing or thang");
+			console.error("Plz say 'v2'");
 			return Promise.resolve(1);
 		});
 	} else if( args[0] == "v2" ) {

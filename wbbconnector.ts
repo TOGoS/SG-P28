@@ -8,9 +8,34 @@ import * as dbusTypes from 'npm:d-bus-type-system@1.0.0';
 import { Adapter, Device } from 'npm:@clebert/node-bluez@1.0.0';
 import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
 
+
+interface Logger {
+	info(message:string) : Promise<void>;
+	update(topic:string, payload:string, retain?:boolean) : Promise<void>;
+}
+
+const NULL_LOGGER : Logger = {
+	info() { return RESOLVED_PROMISE; },
+	update(_topic, _payload, _retain) { return RESOLVED_PROMISE; },
+};
+
 class DeviceNotAvailable extends Error { }
 type Milliseconds = number;
 type FilePath = string;
+
+// Maybe it'd be better to just have MQTTishMessages
+// so that you could make streams of them and use
+// regular stream operations.
+
+const RESOLVED_PROMISE = Promise.resolve();
+function getResolvedPromise() { return RESOLVED_PROMISE; }
+function ignoreResult<T>(promise:Promise<T>) : Promise<void> {
+	// Not sure if any danger to just:
+	// return promise as Promise<unknown> as Promise<void>;
+	return promise.then(getResolvedPromise);
+}
+
+
 
 async function waitForDeviceOrAbort(
 	adapter      : Adapter,
@@ -32,67 +57,74 @@ async function attemptToConnect(
 	opts: {
 		forceDance?  : boolean,
 		abortSignal? : AbortSignal,
-		log?         : (message:string) => void
+		logger?      : Logger,
 	} = {}
 ) : Promise<Device> {
 	let device : Device|undefined;
 	
-	const log = opts.log ?? (() => {});
+	const logger = opts.logger ?? NULL_LOGGER;
 	const abortSignal = opts.abortSignal ?? AbortSignal.any([]);
 	
 	// let device = await adapter.waitForDevice(macAddress);
 	
-	log(`Getting device for ${macAddress}...`);
+	logger.update("status", "");
+	
+	logger.info(`Getting device for ${macAddress}...`);
 	[device] = await adapter.getDevices(macAddress);
 	if( device == undefined ) {
-		log(`getDevices(${macAddress}) returned no device`);
+		logger.info(`getDevices("${macAddress}") returned no device`);
 		throw new DeviceNotAvailable(`${macAddress} not present`);
 	}
 	
-	log(`Checking if ${macAddress} is already connected...`);
+	logger.info(`Checking if ${macAddress} is already connected...`);
 	const alreadyConnected = await device.isConnected();
 	if( alreadyConnected ) {
 		if( opts.forceDance ) {
-			log(`${macAddress} already connected, but we MUST DANCE ANYWAY`);
+			logger.info(`${macAddress} already connected, but we MUST DANCE ANYWAY`);
 		} else {
-			log(`${macAddress} already connected!  Skipping the remove/trust/pair dance`);
+			logger.info(`${macAddress} already connected!  Skipping the remove/trust/pair dance`);
+			logger.update("status", "connected");
 			return device;
 		}
 	} else {
-		log(`${macAddress} is *not* already connected; we must dance`);
+		logger.info(`${macAddress} is *not* already connected; we must dance`);
 	}
 	
 	function checkAbort() {
 		if( abortSignal.aborted ) throw new Error(`Attempt to connect to ${macAddress} aborted`);
 	}
 	
-	log(`Device: ${JSON.stringify(device)}`);
+	logger.info(`Device: ${JSON.stringify(device)}`);
 	
 	//adapter.removeDevice(device);
 	await adapter.callMethod('RemoveDevice', [dbusTypes.objectPathType], [device.objectPath]);
 	checkAbort();
-	log(`${macAddress} removed`);
+	logger.info(`${macAddress} removed`);
 	
-	log(`Waiting for ${macAddress} again...`);
+	logger.info(`Waiting for ${macAddress} again...`);
+	logger.update("status", "offline");
 	
 	const reconnectTimeout = 5000;
 	device = await waitForDeviceOrAbort(adapter, macAddress, AbortSignal.any([abortSignal, AbortSignal.timeout(reconnectTimeout)]));
 	if( device == null ) {
-		log(`After ${reconnectTimeout}ms, ${macAddress} never showed up`);
+		logger.info(`After ${reconnectTimeout}ms, ${macAddress} never showed up`);
 		throw new DeviceNotAvailable();
 	}
 	
 	await device.setProperty('Trusted', dbusTypes.booleanType, true);
 	checkAbort();
-	log(`Set ${macAddress} as trusted!`);
+	logger.info(`Set ${macAddress} as trusted!`);
+	logger.update("status", "trusted");
 	
 	await device.callMethod('Pair');
 	checkAbort();
-	log(`${macAddress} paired!`);
+	logger.info(`${macAddress} paired!`);
+	logger.update("status", "paired");
 	
 	await device.callMethod("Connect");
 	checkAbort();
-	log(`${macAddress} Connected!`);
+	logger.info(`${macAddress} Connected!`);
+	logger.update("status", "connected");
 	
 	return device;
 }
@@ -119,26 +151,11 @@ function spawnFsWatcher(
 }
 
 interface WBBState {
+	name: string;
 	macAddress: string;
 	bluezDevice?: Device;
 	status?: "disconnected"|"connecting"|"connected";
 	devicePathGuess?: FilePath;
-}
-
-// Maybe it'd be better to just have MQTTishMessages
-// so that you could make streams of them and use
-// regular stream operations.
-interface Logger {
-	info(message:string) : Promise<void>;
-	update(topic:string, payload:string) : Promise<void>;
-}
-
-const RESOLVED_PROMISE = Promise.resolve();
-function getResolvedPromise() { return RESOLVED_PROMISE; }
-function ignoreResult<T>(promise:Promise<T>) : Promise<void> {
-	// Not sure if any danger to just:
-	// return promise as Promise<unknown> as Promise<void>;
-	return promise.then(getResolvedPromise);
 }
 
 class WBBConnectorV2 extends ProcessGroup {
@@ -153,15 +170,11 @@ class WBBConnectorV2 extends ProcessGroup {
 	#attemptToConnectOpts = {
 		forceDance: true, // Otherwise we can't match it up with a /dev/input/whatever!
 		abortSignal: this.#abortSignal,
-		log: (msg:string) => this.log(`attemptToConnect: ${msg}`)
 	}
 	
 	constructor(opts:{id?:string, logger?:Logger}={}) {
 		super(opts);
-		this.#logger = opts.logger ?? {
-			info() { return RESOLVED_PROMISE; },
-			update(_topic, _payload) { return RESOLVED_PROMISE; },
-		}
+		this.#logger = opts.logger ?? NULL_LOGGER;
 		this.#dBus = new SystemDBus();
 	}
 	
@@ -183,13 +196,20 @@ class WBBConnectorV2 extends ProcessGroup {
 				if( sig.aborted ) return EXITCODE_ABORTED;
 				
 				const devState = this.#deviceStates[devKey];
-				this.log(`btConnectionLoop: Checking on ${devKey} (${devState.status})`);
+				const devTopicPrefix = `devices/${devState.name}`;
+				this.log(`btConnectionLoop: Checking on ${devState.name} (${devState.status})`);
 				if( devState.status == undefined || devState.status == "disconnected" ) {
 					// TODO: timeout after, like, 20 seconds idk
 					try {
 						devState.bluezDevice = await attemptToConnect(
 							adapter, devState.macAddress,
-							this.#attemptToConnectOpts
+							{
+								...this.#attemptToConnectOpts,
+								logger: {
+									info: (message:string) => this.#logger.info(`attemptToConnect("${devState.macAddress}"): ${message}`),
+									update: (topic:string, payload:string, persist:boolean=false) => this.#logger.update(`${devTopicPrefix}/${topic}`, payload, persist),
+								}
+							}
 						);
 						devState.status = "connected";
 						await usleep(1000); // Give /dev/input/event a chance to show up before we start connecting another
@@ -232,7 +252,7 @@ class WBBConnectorV2 extends ProcessGroup {
 						const devState = this.#deviceStates[devKey];
 						if( devState.devicePathGuess == path ) {
 							// Un-guess it!
-							devState.devicePathGuess = undefined;
+							this.setDevicePathGuess(devState, undefined);
 							// Maybe it's disconnected too, but let the other
 							// process take care of that.
 						}
@@ -267,8 +287,13 @@ class WBBConnectorV2 extends ProcessGroup {
 		await this.#adapter.startDiscovery();
 	}
 	
-	addDevice(macAddress:string) {
-		this.#deviceStates[macAddress] = { macAddress };
+	addDevice(deviceInfo:{name:string, macAddress:string}) {
+		this.#deviceStates[deviceInfo.name] = { ...deviceInfo };
+	}
+	
+	setDevicePathGuess(dev:WBBState, pathGuess:string|undefined) {
+		dev.devicePathGuess = pathGuess;
+		this.#logger.update(`devices/${dev.name}/pathguess`, pathGuess ?? '', true);
 	}
 	
 	override dispose() {
@@ -281,8 +306,9 @@ class WBBConnectorV2 extends ProcessGroup {
 		const connectedDevices = Object.values(this.#deviceStates).filter(state => state.status === "connected" && !state.devicePathGuess);
 		
 		if( connectedDevices.length === 1 ) {
+			const dev = connectedDevices[0];
 			this.log(`inputEventDeviceAppeared: Associating ${connectedDevices[0].macAddress} with ${path}`);
-			connectedDevices[0].devicePathGuess = path;
+			this.setDevicePathGuess(dev, path);
 		} else if( connectedDevices.length === 0 ) {
 			this.log(`inputEventDeviceAppeared: Nothing connected to associate ${path} to`);
 		} else {
@@ -340,8 +366,8 @@ class MultiLogger implements Logger {
 	info(message: string): Promise<void> {
 	  return ignoreResult(Promise.all(this.#loggers.map(l => l.info(message))));
 	}
-	update(topic: string, payload: string): Promise<void> {
-		return ignoreResult(Promise.all(this.#loggers.map(l => l.update(topic, payload))));
+	update(topic: string, payload: string, retain?:boolean): Promise<void> {
+		return ignoreResult(Promise.all(this.#loggers.map(l => l.update(topic, payload, retain))));
 	}
 }
 
@@ -354,7 +380,7 @@ class ConsoleLogger implements Logger {
 		console.info(`# ${message}`);
 		return RESOLVED_PROMISE;
 	}
-	update(topic: string, payload: string): Promise<void> {
+	update(topic: string, payload: string, _retain:boolean): Promise<void> {
 		console.log(`${topic} ${payload}`);
 		return RESOLVED_PROMISE;
 	}
@@ -363,12 +389,16 @@ class ConsoleLogger implements Logger {
 function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 	const deviceMacRe = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 	
-	const deviceMacAddresses = [];
+	const deviceInfos : {name:string, macAddress:string}[] = [];
 		
 	for( const arg of args ) {
 		let m : RegExpExecArray|null;
 		if( (m = deviceMacRe.exec(arg)) !== null ) {
-			deviceMacAddresses.push(m[0]);
+			const macAddress : string = m[0];
+			deviceInfos.push({
+				name: macAddress.replaceAll(':','-'),
+				macAddress,
+			});
 		} else {
 			return functionToProcessLike((_sig) => {
 				console.error(`Unrecognized argument: ${arg}`);
@@ -377,6 +407,7 @@ function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 		}
 	}
 	
+	// TODO: Allow overide via --logger or whatever
 	const topicPrefix = "wbbconnector";
 		
 	// TODO: MQTT server, and whether to use it at all,
@@ -405,20 +436,25 @@ function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 	}));
 	const mqttLogger : Logger = {
 		info: (text) => ignoreResult(mqttThen(client => client.publish(chatTopic, textEncoder.encode(text)))),
-		update: (topic, payload) => ignoreResult(mqttThen(client => client.publish(topic, textEncoder.encode(payload)))),
+		update: (topic, payload, retain=false) => ignoreResult(mqttThen(client =>
+			client.publish(`${topicPrefix}/${topic}`, textEncoder.encode(payload), {
+				retain
+			})
+		)),
 	};
 	
 	const consoleLogger : Logger = new ConsoleLogger(console);
 	
 	const logger = new MultiLogger([
-		mqttLogger, consoleLogger
+		consoleLogger,
+		mqttLogger
 	]);
 	
 	const mang = new WBBConnectorV2({
 		logger
 	});
-	for( const macAddress of deviceMacAddresses ) {
-		mang.addDevice(macAddress);
+	for( const deviceInfo of deviceInfos ) {
+		mang.addDevice({...deviceInfo});
 	}
 	// TODO: Somehow register mqtt client (or whatever)
 	// with mang to close it on kill() and wait for it on wait().

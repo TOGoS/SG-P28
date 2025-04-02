@@ -17,7 +17,7 @@ const OSCUDP_TARGET_REGEX = new RegExp(
 const MQTT_TARGET_REGEX = new RegExp(
 	"^mqtt://" +
 	hostnameRegex("target").source +
-	":(?<targetport>\\d+)" +
+	"(?::(?<targetport>\\d+))?" +
 	"(?:;debug=(?<debug>on|off))?" +
 	"(?<path>/.*)?$"
 );
@@ -37,8 +37,9 @@ export type TargetSpec = {
 	debugging: boolean,
 } | {
 	type: "MQTT",
+	// Leaving out for now: clientId, username, password, TLS
 	targetHostname: string,
-	targetPort: number,
+	targetPort?: number,
 	topicPrefix: string,
 	debugging: boolean,
 };
@@ -85,7 +86,7 @@ export function parseTargetSpec(targetSpec:string) : TargetSpec {
 		// 'bracketedhostname' is to support IPv6 addresses in URIs, like http://[fe80::9908:15:1bb5:39db%18]:1234/some-path
 		// Possibly parsing should be stricter.
 		const targetHostname : string = m.groups!["targetbracketedhostname"] ?? m.groups!["targethostname"];
-		const targetPort : number = +m.groups!["targetport"];
+		const targetPort : number|undefined = m.groups!["targetport"] ? +m.groups!["targetport"] : undefined;
 		const path : string = m.groups!["path"];
 		const topicPrefix = path == undefined || path == '' ? '' : path.substring(1);
 		const debugging = (m.groups!["debug"] || "off") == "on";

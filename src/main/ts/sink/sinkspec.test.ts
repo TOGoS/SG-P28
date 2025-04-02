@@ -51,6 +51,18 @@ Deno.test("parse target spec osc+udp with localhost and debug on", () => {
 	assertEquals(target, expected);
 });
 
+//// MQTT
+
+Deno.test("parse MQTT target spec with no port", () => {
+	const target : TargetSpec = parseTargetSpec("mqtt://foo.com");
+	const expected : TargetSpec = {
+		type: "MQTT",
+		targetHostname: "foo.com",
+		topicPrefix: "",
+		debugging: false,
+	};
+	assertEquals(target, expected);
+});
 Deno.test("parse MQTT target spec with no prefix", () => {
 	const target : TargetSpec = parseTargetSpec("mqtt://foo.com:1234");
 	const expected : TargetSpec = {

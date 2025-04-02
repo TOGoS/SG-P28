@@ -1,5 +1,5 @@
 function hostnameRegex(capturePrefix:string) {
-	return new RegExp(`(?:\\[(?<${capturePrefix}bracketedhostname>[^\\]]+)\\]|(?<${capturePrefix}hostname>[^:;]+))`);
+	return new RegExp(`(?:\\[(?<${capturePrefix}bracketedhostname>[^\\]]+)\\]|(?<${capturePrefix}hostname>[^:;/]+))`);
 }
 
 const OSCUDP_TARGET_REGEX = new RegExp(

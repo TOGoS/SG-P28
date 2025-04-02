@@ -63,6 +63,17 @@ Deno.test("parse MQTT target spec with no port", () => {
 	};
 	assertEquals(target, expected);
 });
+Deno.test("parse MQTT target spec with path but no port", () => {
+	const target : TargetSpec = parseTargetSpec("mqtt://foo.com/topik");
+	const expected : TargetSpec = {
+		type: "MQTT",
+		targetHostname: "foo.com",
+		topicPrefix: "topik",
+		debugging: false,
+	};
+	assertEquals(target, expected);
+});
+
 Deno.test("parse MQTT target spec with no prefix", () => {
 	const target : TargetSpec = parseTargetSpec("mqtt://foo.com:1234");
 	const expected : TargetSpec = {

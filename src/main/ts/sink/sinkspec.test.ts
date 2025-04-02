@@ -50,3 +50,37 @@ Deno.test("parse target spec osc+udp with localhost and debug on", () => {
 	};
 	assertEquals(target, expected);
 });
+
+Deno.test("parse MQTT target spec with no prefix", () => {
+	const target : TargetSpec = parseTargetSpec("mqtt://foo.com:1234");
+	const expected : TargetSpec = {
+		type: "MQTT",
+		targetHostname: "foo.com",
+		targetPort: 1234,
+		topicPrefix: "",
+		debugging: false,
+	};
+	assertEquals(target, expected);
+});
+Deno.test("parse MQTT target spec with no prefix (trailing '/')", () => {
+	const target : TargetSpec = parseTargetSpec("mqtt://foo.com:1234/");
+	const expected : TargetSpec = {
+		type: "MQTT",
+		targetHostname: "foo.com",
+		targetPort: 1234,
+		topicPrefix: "",
+		debugging: false,
+	};
+	assertEquals(target, expected);
+});
+Deno.test("parse MQTT target spec with prefix with trailing '/'", () => {
+	const target : TargetSpec = parseTargetSpec("mqtt://foo.com:1234/globular/");
+	const expected : TargetSpec = {
+		type: "MQTT",
+		targetHostname: "foo.com",
+		targetPort: 1234,
+		topicPrefix: "globular/",
+		debugging: false,
+	};
+	assertEquals(target, expected);
+});

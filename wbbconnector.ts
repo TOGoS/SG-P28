@@ -349,6 +349,7 @@ class PromisedProcessLike implements ProcessLike {
 }
 
 import { Mqtt, MqttClient } from 'jsr:@ymjacky/mqtt5@0.0.19';
+import { parseTargetSpec, TargetSpec } from './src/main/ts/sink/sinkspec.ts';
 const textEncoder = new TextEncoder();
 
 function mkPromiseChain<T>(subject:T) : <R>(action:(subject:T) => Promise<R>) => Promise<R> {
@@ -386,10 +387,79 @@ class ConsoleLogger implements Logger {
 	}
 }
 
+class MQTTLogger implements Logger {
+	#client      : MqttClient;
+	#topicPrefix : string;
+	#chatTopic   : string;
+	#statusTopic : string;
+	#mqttThen    : <R>(action:(client:MqttClient) => Promise<R>) => Promise<R>;
+	constructor(client:MqttClient, topicPrefix:string) {
+		this.#client = client;
+		this.#topicPrefix = topicPrefix;
+		this.#chatTopic   = topicPrefix + 'chat';
+		this.#statusTopic = topicPrefix + 'status';
+		this.#mqttThen = mkPromiseChain(client);
+		this.#mqttThen(client => client.connect({
+			will: {
+				topic: this.#statusTopic,
+				payload: textEncoder.encode("offline"),
+				retain: true,
+			}
+		}));
+		this.#mqttThen(client => client.publish(this.#statusTopic, 'online', { retain: true }));
+	}
+	info(text:string) {
+		return ignoreResult(this.#mqttThen(client => client.publish(this.#chatTopic, text)));
+	}
+	update(topic:string, payload:string, retain=false) {
+		return ignoreResult(this.#mqttThen(client =>
+			client.publish(`${this.#topicPrefix}${topic}`, payload, {retain})
+		));
+	}
+}
+
+function makeLogger(spec:TargetSpec) : Logger {
+	switch(spec.type) {
+		case "MQTT": {
+			const port = spec.targetPort ?? 1883;
+			const url = new URL(`mqtt://${spec.targetHostname}:${port}`);
+			const client = new MqttClient({
+				url,
+				// clientId: 'clientA',
+				// username: 'userA',
+				// password: 'passwordA',
+				// logger: logger,
+				clean: true,
+				protocolVersion: Mqtt.ProtocolVersion.MQTT_V3_1_1,
+				keepAlive: 30,	
+			});
+			return new MQTTLogger(client, spec.topicPrefix);
+		}
+		case "Debug": {
+			return new ConsoleLogger(console);
+		}
+		default: {
+			throw new Error(`Don't know how to make logger for ${JSON.stringify(spec)}`);
+		}
+	}
+}
+
+function makeMultiLogger(specs:TargetSpec[]) {
+	const loggers : Logger[] = specs.map(makeLogger);
+	return (
+		loggers.length == 0 ? NULL_LOGGER :
+		loggers.length == 1 ? loggers[0] :
+		new MultiLogger(loggers)
+	);
+}
+
 function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 	const deviceMacRe = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+	const namedDeviceMacRe = /^([^-][^=]*)=([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
+	const loggerRe = /^--logger=(.*)/;
 	
 	const deviceInfos : {name:string, macAddress:string}[] = [];
+	const loggerSpecs : TargetSpec[] = [];
 		
 	for( const arg of args ) {
 		let m : RegExpExecArray|null;
@@ -399,6 +469,12 @@ function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 				name: macAddress.replaceAll(':','-'),
 				macAddress,
 			});
+		} else if( (m = namedDeviceMacRe.exec(arg)) !== null ) {
+			const name : string = m[1];
+			const macAddress : string = m[1];
+			deviceInfos.push({name, macAddress});
+		} else if( (m = loggerRe.exec(arg)) !== null ) {
+			loggerSpecs.push(parseTargetSpec(m[1]));
 		} else {
 			return functionToProcessLike((_sig) => {
 				console.error(`Unrecognized argument: ${arg}`);
@@ -407,48 +483,10 @@ function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 		}
 	}
 	
-	// TODO: Allow overide via --logger or whatever
-	const topicPrefix = "wbbconnector";
-		
-	// TODO: MQTT server, and whether to use it at all,
-	// or something else, or both, should be configurable!
-	const mqttThen = mkPromiseChain(new MqttClient({
-		url: new URL('mqtt://localhost:1883'),
-		// clientId: 'clientA',
-		// username: 'userA',
-		// password: 'passwordA',
-		// logger: logger,
-		clean: true,
-		protocolVersion: Mqtt.ProtocolVersion.MQTT_V3_1_1,
-		keepAlive: 30,	
-	}));
-	const statusTopic = `${topicPrefix}/status`;
-	const chatTopic = `${topicPrefix}/chat`;
-			
-	mqttThen(client => client.connect({
-		will: {
-			topic: statusTopic,
-			payload: textEncoder.encode("offline"),
-		}
-	}));
-	mqttThen(client => client.publish(statusTopic, "online", {
-		retain: true
-	}));
-	const mqttLogger : Logger = {
-		info: (text) => ignoreResult(mqttThen(client => client.publish(chatTopic, textEncoder.encode(text)))),
-		update: (topic, payload, retain=false) => ignoreResult(mqttThen(client =>
-			client.publish(`${topicPrefix}/${topic}`, textEncoder.encode(payload), {
-				retain
-			})
-		)),
-	};
-	
-	const consoleLogger : Logger = new ConsoleLogger(console);
-	
-	const logger = new MultiLogger([
-		consoleLogger,
-		mqttLogger
-	]);
+	const logger = makeMultiLogger(loggerSpecs);
+	if( logger == NULL_LOGGER ) {
+		console.warn(`No --logger indicated; you won't hear about connections!`);
+	}
 	
 	const mang = new WBBConnectorV2({
 		logger

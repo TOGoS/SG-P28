@@ -125,9 +125,20 @@ interface WBBState {
 	devicePathGuess?: FilePath;
 }
 
+// Maybe it'd be better to just have MQTTishMessages
+// so that you could make streams of them and use
+// regular stream operations.
 interface Logger {
-	info(message:string) : void;
-	update(topic:string, payload:string) : void;
+	info(message:string) : Promise<void>;
+	update(topic:string, payload:string) : Promise<void>;
+}
+
+const RESOLVED_PROMISE = Promise.resolve();
+function getResolvedPromise() { return RESOLVED_PROMISE; }
+function ignoreResult<T>(promise:Promise<T>) : Promise<void> {
+	// Not sure if any danger to just:
+	// return promise as Promise<unknown> as Promise<void>;
+	return promise.then(getResolvedPromise);
 }
 
 class WBBConnectorV2 extends ProcessGroup {
@@ -148,8 +159,8 @@ class WBBConnectorV2 extends ProcessGroup {
 	constructor(opts:{id?:string, logger?:Logger}={}) {
 		super(opts);
 		this.#logger = opts.logger ?? {
-			info() { },
-			update(_topic, _payload) { },
+			info() { return RESOLVED_PROMISE; },
+			update(_topic, _payload) { return RESOLVED_PROMISE; },
 		}
 		this.#dBus = new SystemDBus();
 	}
@@ -201,8 +212,8 @@ class WBBConnectorV2 extends ProcessGroup {
 		return 0;
 	}
 	
-	log(msg:string) {
-		this.#logger.info(msg);
+	log(msg:string) : Promise<void> {
+		return this.#logger.info(msg);
 	}
 	
 	async start() : Promise<void> {
@@ -314,11 +325,39 @@ class PromisedProcessLike implements ProcessLike {
 import { Mqtt, MqttClient } from 'jsr:@ymjacky/mqtt5@0.0.19';
 const textEncoder = new TextEncoder();
 
-function mkPromiseChain<T>(subject:T) : (action:(subject:T) => Promise<unknown>) => void {
+function mkPromiseChain<T>(subject:T) : <R>(action:(subject:T) => Promise<R>) => Promise<R> {
 	let queue : Promise<unknown> = Promise.resolve();
-	return (action:(subject:T) => Promise<unknown>) => {
-		queue = queue.then(() => action(subject));
+	return <R>(action:(subject:T) => Promise<R>) => {
+		return (queue = queue.then(() => action(subject))) as Promise<R>;
 	};
+}
+
+class MultiLogger implements Logger {
+	#loggers : Logger[];
+	constructor(loggers:Logger[]) {
+		this.#loggers = loggers;
+	}
+	info(message: string): Promise<void> {
+	  return ignoreResult(Promise.all(this.#loggers.map(l => l.info(message))));
+	}
+	update(topic: string, payload: string): Promise<void> {
+		return ignoreResult(Promise.all(this.#loggers.map(l => l.update(topic, payload))));
+	}
+}
+
+class ConsoleLogger implements Logger {
+	#console : Console;
+	constructor(console:Console) {
+		this.#console = console;
+	}
+	info(message: string): Promise<void> {
+		console.info(`# ${message}`);
+		return RESOLVED_PROMISE;
+	}
+	update(topic: string, payload: string): Promise<void> {
+		console.log(`${topic} ${payload}`);
+		return RESOLVED_PROMISE;
+	}
 }
 
 function spawnWbbConnectorV2(args:string[]) : ProcessLike {
@@ -364,10 +403,16 @@ function spawnWbbConnectorV2(args:string[]) : ProcessLike {
 	mqttThen(client => client.publish(statusTopic, "online", {
 		retain: true
 	}));
-	const logger : Logger = {
-		info: (text) => mqttThen(client => client.publish(chatTopic, textEncoder.encode(text))),
-		update: (topic, payload) => mqttThen(client => client.publish(topic, textEncoder.encode(payload))),
+	const mqttLogger : Logger = {
+		info: (text) => ignoreResult(mqttThen(client => client.publish(chatTopic, textEncoder.encode(text)))),
+		update: (topic, payload) => ignoreResult(mqttThen(client => client.publish(topic, textEncoder.encode(payload)))),
 	};
+	
+	const consoleLogger : Logger = new ConsoleLogger(console);
+	
+	const logger = new MultiLogger([
+		mqttLogger, consoleLogger
+	]);
 	
 	const mang = new WBBConnectorV2({
 		logger

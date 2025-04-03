@@ -40,7 +40,7 @@ export type TargetSpec = {
 	// Leaving out for now: clientId, username, password, TLS
 	targetHostname: string,
 	targetPort?: number,
-	topicPrefix: string,
+	topic: string,
 	debugging: boolean,
 };
 
@@ -88,13 +88,13 @@ export function parseTargetSpec(targetSpec:string) : TargetSpec {
 		const targetHostname : string = m.groups!["targetbracketedhostname"] ?? m.groups!["targethostname"];
 		const targetPort : number|undefined = m.groups!["targetport"] ? +m.groups!["targetport"] : undefined;
 		const path : string = m.groups!["path"];
-		const topicPrefix = path == undefined || path == '' ? '' : path.substring(1);
+		const topic = path == undefined || path == '' ? '' : path.substring(1);
 		const debugging = (m.groups!["debug"] || "off") == "on";
 		return stripUndefs({
 			type: "MQTT",
 			targetHostname,
 			targetPort,
-			topicPrefix,
+			topic,
 			debugging,
 		}) as TargetSpec;
 	} else {

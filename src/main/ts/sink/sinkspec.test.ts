@@ -58,7 +58,7 @@ Deno.test("parse MQTT target spec with no port", () => {
 	const expected : TargetSpec = {
 		type: "MQTT",
 		targetHostname: "foo.com",
-		topicPrefix: "",
+		topic: "",
 		debugging: false,
 	};
 	assertEquals(target, expected);
@@ -68,7 +68,7 @@ Deno.test("parse MQTT target spec with path but no port", () => {
 	const expected : TargetSpec = {
 		type: "MQTT",
 		targetHostname: "foo.com",
-		topicPrefix: "topik",
+		topic: "topik",
 		debugging: false,
 	};
 	assertEquals(target, expected);
@@ -80,7 +80,7 @@ Deno.test("parse MQTT target spec with no prefix", () => {
 		type: "MQTT",
 		targetHostname: "foo.com",
 		targetPort: 1234,
-		topicPrefix: "",
+		topic: "",
 		debugging: false,
 	};
 	assertEquals(target, expected);
@@ -91,7 +91,7 @@ Deno.test("parse MQTT target spec with no prefix (trailing '/')", () => {
 		type: "MQTT",
 		targetHostname: "foo.com",
 		targetPort: 1234,
-		topicPrefix: "",
+		topic: "",
 		debugging: false,
 	};
 	assertEquals(target, expected);
@@ -102,7 +102,7 @@ Deno.test("parse MQTT target spec with prefix with trailing '/'", () => {
 		type: "MQTT",
 		targetHostname: "foo.com",
 		targetPort: 1234,
-		topicPrefix: "globular/",
+		topic: "globular/",
 		debugging: false,
 	};
 	assertEquals(target, expected);

@@ -418,6 +418,12 @@ class MQTTLogger implements Logger {
 	}
 }
 
+function addTrailingSlash(path:string) : string {
+	if( path == '' ) return path;
+	if( path.endsWith('/') ) return path;
+	return path + '/';
+}
+
 function makeLogger(spec:TargetSpec) : Logger {
 	switch(spec.type) {
 		case "MQTT": {
@@ -433,7 +439,7 @@ function makeLogger(spec:TargetSpec) : Logger {
 				protocolVersion: Mqtt.ProtocolVersion.MQTT_V3_1_1,
 				keepAlive: 30,	
 			});
-			return new MQTTLogger(client, spec.topicPrefix);
+			return new MQTTLogger(client, addTrailingSlash(spec.topic));
 		}
 		case "Debug": {
 			return new ConsoleLogger(console);

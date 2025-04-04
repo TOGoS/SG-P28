@@ -15,20 +15,31 @@ export function newPseudoPid() : string {
 	return "pseudoproc:"+(nextPseudoPid++).toString();
 }
 
-export function functionToProcessLike(
-	fn: (signal:AbortSignal) => Promise<number>,
-	opts: {
-		name?:string,
-		id?:string,
-		onError?:(error:any)=>number,
-	} = {}
-): ProcessLike {
+interface FunctionToProcessLikeOpts {
+	name?:string,
+	id?:string,
+	// deno-lint-ignore no-explicit-any
+	onError? : (error:any)=>number,
+}
+
+export function functionToProcessLike2<T extends ProcessLike>(
+	procConstructor : (proc:ProcessLike) => T,
+	fn: (this:T, signal:AbortSignal) => Promise<number>,
+	opts: FunctionToProcessLikeOpts = {}
+): T {
 	const id = opts.id ?? newPseudoPid();
 	const name = opts.name;
 	const onErr = opts.onError;
+	
+	const proc : T = procConstructor({
+		kill(sig: ProcSig) { controller.abort(sig); },
+		wait() { return prom; },
+		get id() { return id; },
+		get name() { return name; },
+	});
 
 	const controller = new AbortController();
-	let prom = fn(controller.signal);
+	let prom = fn.call(proc, controller.signal);
 	if( onErr ) {
 		prom = prom.catch( e => onErr(e) );
 	} else {
@@ -37,10 +48,9 @@ export function functionToProcessLike(
 			return 1;
 		});
 	}
-	return {
-		kill(sig: ProcSig) { controller.abort(sig); },
-		wait() { return prom; },
-		get id() { return id; },
-		get name() { return name; },
-	};
+	return proc;
+}
+
+export function functionToProcessLike(fn:(this:ProcessLike, signal:AbortSignal) => Promise<number>, opts:FunctionToProcessLikeOpts) {
+	return functionToProcessLike2(p => p, fn, opts);
 }

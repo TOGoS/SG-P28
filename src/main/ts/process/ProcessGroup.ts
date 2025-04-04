@@ -46,3 +46,5 @@ export class ProcessGroup implements ProcessLike {
 		return this.id;
 	}
 }
+
+export default ProcessGroup;

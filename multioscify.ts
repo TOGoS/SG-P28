@@ -1,4 +1,11 @@
-// This program will take options:
+// A program to read WBB events from /dev/input/event(number) devices
+// and forward them somewhere else, probably over OSC.
+// 
+// Controlled by MQTT.  --control-port=(MQTT URI) indicates the root
+// path that is used to control this program and that this program
+// publishes statis updates to.
+// 
+// Options:
 //   --control-root=mqtt://localhost:1883/(mytopic)/
 //   --udp-local-port=1234
 // MQTT topics (output):
@@ -161,9 +168,12 @@ class OSCifierControl extends ProcessGroup {
 			const propName = m[2] == "target" ? "targetUri" : "inputPath";
 			this.setReaderProp(readerName, propName, payload);
 		}
+		console.log("TODO: Make sure a read3er is running?");
+		return Promise.resolve();
 	}
 }
 
+// TODO: Have this return a ProcessLike
 async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number> {
 	if( config.controllerSpec.type != "MQTT" ) {
 		console.error(`Only 'mqtt' controller supported`);
@@ -191,7 +201,7 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 	mqttClient.publish(statusTopic, "online");
 	
 	// TODO: Start a OSCifierControl, blah blah
-	console.log("TODO!")
+	console.log("TODO: Start a OSCifierControl, wait for it to finish (which might be forever)")
 	
 	return 0;
 }

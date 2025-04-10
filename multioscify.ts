@@ -63,10 +63,7 @@ interface OSCifierConfig {
 	targetUri? : string;
 }
 
-interface OSCifierStats { }
-interface OSCifierProcess extends ProcessLike {
-	readonly stats : OSCifierStats;
-}
+interface OSCifierProcess extends ProcessLike {}
 interface OSCifier {
 	currentConfig : OSCifierConfig;
 	targetConfig  : OSCifierConfig;
@@ -74,12 +71,8 @@ interface OSCifier {
 }
 
 function spawnOscifier(devicePath : FilePath, eventSink : Consumer<InputEvent>, logger : Logger ) : OSCifierProcess {
-	return functionToProcessLike2<OSCifierProcess>(
-		pl => {
-			const obj = Object.create(pl);
-			// obj.stats = {};
-			return obj;
-		},
+	return functionToProcessLike2<ProcessLike>(
+		pl => pl,
 		async abortSignal => {
 			const littleEndian = true; // May need to override?
 			logger.info(`Opening ${devicePath}...`);
@@ -172,7 +165,6 @@ class OSCifierControl extends ProcessGroup {
 				this.#logger.info(`Killing old reader process (${osc.currentProcess.id} / '${osc.currentProcess.name}')`)
 				osc.currentProcess.kill("SIGTERM");
 			}
-			// TODO: Publush status (and stats, somehow) of current process
 			if( targetConfig.inputPath != undefined && targetConfig.targetUri != undefined ) {
 				setTimeout(async () => { // 'Throttle/debounce changes'
 					// If it has been changed again, abort this update:
@@ -198,11 +190,9 @@ class OSCifierControl extends ProcessGroup {
 	async handleMessage(topic:string, payload:string) : Promise<void> {
 		let m : RegExpExecArray | null;
 		if( topic == 'stop' ) {
-			// TODO: Could accept exit code as arg, just as a test that that works
 			await this.#logger.info("Received stop command; exiting with code 0");
 			this.exit(0);
 		} else if( topic == 'restart' ) {
-			// TODO: Could accept exit code as arg, just as a test that that works
 			await this.#logger.info("Received restart command; exiting with code 69");
 			this.exit(69);
 		} else if( (m = /^readers\/([^\/]+)\/(target|inputpath)\/set$/.exec(topic)) != null ) {
@@ -210,7 +200,6 @@ class OSCifierControl extends ProcessGroup {
 			const propName = m[2] == "target" ? "targetUri" : "inputPath";
 			this.setReaderProp(readerName, propName, payload);
 		} else {
-			// TODO: Ignore own output messages
 			this.#logger.info(`Unrecognized topic: ${topic}`);
 		}
 		return Promise.resolve();

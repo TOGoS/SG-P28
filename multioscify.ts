@@ -171,7 +171,7 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 		console.error(`Only 'mqtt' controller supported`);
 		return 1;
 	}
-	const port = config.controllerSpec.targetHostname ?? 1883;
+	const port = config.controllerSpec.targetPort ?? 1883;
 	const topicPrefix = config.controllerSpec.topic;
 	const readersTopic = `${topicPrefix}readers`;
 	const statusTopic  = `${topicPrefix}status`;

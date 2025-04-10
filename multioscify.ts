@@ -148,7 +148,8 @@ class OSCifierControl extends ProcessGroup {
 		return oscifier;
 	}
 	
-	setReaderProp(readerName:string, propName:"inputPath"|"targetUri", value:string) : void {
+	setReaderProp(readerName:string, propName:"inputPath"|"targetUri", value:string|undefined) : void {
+		if( value == '' ) value = undefined;
 		let osc = this.#oscifiers[readerName];
 		if( osc == null ) {
 			this.#oscifiers[readerName] = osc = {

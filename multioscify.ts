@@ -201,6 +201,10 @@ class OSCifierControl extends ProcessGroup {
 			// TODO: Could accept exit code as arg, just as a test that that works
 			await this.#logger.info("Received stop command; exiting with code 0");
 			this.exit(0);
+		} else if( topic == 'restart' ) {
+			// TODO: Could accept exit code as arg, just as a test that that works
+			await this.#logger.info("Received restart command; exiting with code 69");
+			this.exit(69);
 		} else if( (m = /^readers\/([^\/]+)\/(target|inputpath)\/set$/.exec(topic)) != null ) {
 			const readerName = m[1];
 			const propName = m[2] == "target" ? "targetUri" : "inputPath";
@@ -265,7 +269,7 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 		logger.info(`mqttReader: Registering publish handler`);
 		mqttClient.on('publish', onPublish);
 		
-		const subscribeTopics = [`${topicPrefix}stop`, `${readersTopic}/+/inputpath/set`, `${readersTopic}/+/target/set`];
+		const subscribeTopics = [`${topicPrefix}stop`, `${topicPrefix}restart`, `${readersTopic}/+/inputpath/set`, `${readersTopic}/+/target/set`];
 		for( const subtop of subscribeTopics ) {
 			logger.info(`mqttReader: Subscribing to ${subtop}...`);
 			await mqttClient.subscribe(subtop);

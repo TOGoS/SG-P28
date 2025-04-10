@@ -1,0 +1,10 @@
+#!/bin/bash
+
+"$@"
+while [ $? -eq 69 ]
+do
+	echo "$1 requested restart"
+	sleep 1
+	echo "Starting $1..."
+	"$@"
+done

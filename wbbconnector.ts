@@ -9,16 +9,6 @@ import { Adapter, Device } from 'npm:@clebert/node-bluez@1.0.0';
 import { EXITCODE_ABORTED, functionToProcessLike, newPseudoPid } from './src/main/ts/process/util.ts';
 
 
-interface Logger {
-	info(message:string) : Promise<void>;
-	update(topic:string, payload:string, retain?:boolean) : Promise<void>;
-}
-
-const NULL_LOGGER : Logger = {
-	info() { return RESOLVED_PROMISE; },
-	update(_topic, _payload, _retain) { return RESOLVED_PROMISE; },
-};
-
 class DeviceNotAvailable extends Error { }
 type Milliseconds = number;
 type FilePath = string;
@@ -26,16 +16,6 @@ type FilePath = string;
 // Maybe it'd be better to just have MQTTishMessages
 // so that you could make streams of them and use
 // regular stream operations.
-
-const RESOLVED_PROMISE = Promise.resolve();
-function getResolvedPromise() { return RESOLVED_PROMISE; }
-function ignoreResult<T>(promise:Promise<T>) : Promise<void> {
-	// Not sure if any danger to just:
-	// return promise as Promise<unknown> as Promise<void>;
-	return promise.then(getResolvedPromise);
-}
-
-
 
 async function waitForDeviceOrAbort(
 	adapter      : Adapter,
@@ -350,78 +330,14 @@ class PromisedProcessLike implements ProcessLike {
 
 import { Mqtt, MqttClient } from 'jsr:@ymjacky/mqtt5@0.0.19';
 import { parseTargetSpec, TargetSpec } from './src/main/ts/sink/sinkspec.ts';
-const textEncoder = new TextEncoder();
+import Logger from './src/main/ts/lerg/Logger.ts';
+import { ConsoleLogger, MultiLogger, NULL_LOGGER } from './src/main/ts/lerg/loggers.ts';
+import { ignoreResult, RESOLVED_PROMISE } from './src/main/ts/promises.ts';
+import { MQTTLogger } from './src/main/ts/mqtt/MQTTLogger.ts';
+export const textEncoder = new TextEncoder();
 
-function mkPromiseChain<T>(subject:T) : <R>(action:(subject:T) => Promise<R>) => Promise<R> {
-	let queue : Promise<unknown> = Promise.resolve();
-	return <R>(action:(subject:T) => Promise<R>) => {
-		return (queue = queue.then(() => action(subject))) as Promise<R>;
-	};
-}
-
-class MultiLogger implements Logger {
-	#loggers : Logger[];
-	constructor(loggers:Logger[]) {
-		this.#loggers = loggers;
-	}
-	info(message: string): Promise<void> {
-	  return ignoreResult(Promise.all(this.#loggers.map(l => l.info(message))));
-	}
-	update(topic: string, payload: string, retain?:boolean): Promise<void> {
-		return ignoreResult(Promise.all(this.#loggers.map(l => l.update(topic, payload, retain))));
-	}
-}
-
-class ConsoleLogger implements Logger {
-	#console : Console;
-	constructor(console:Console) {
-		this.#console = console;
-	}
-	info(message: string): Promise<void> {
-		console.info(`# ${message}`);
-		return RESOLVED_PROMISE;
-	}
-	update(topic: string, payload: string, _retain:boolean): Promise<void> {
-		console.log(`${topic} ${payload}`);
-		return RESOLVED_PROMISE;
-	}
-}
-
-class MQTTLogger implements Logger {
-	#client      : MqttClient;
-	#topicPrefix : string;
-	#chatTopic   : string;
-	#statusTopic : string;
-	#mqttThen    : <R>(action:(client:MqttClient) => Promise<R>) => Promise<R>;
-	constructor(client:MqttClient, topicPrefix:string) {
-		this.#client = client;
-		this.#topicPrefix = topicPrefix;
-		this.#chatTopic   = topicPrefix + 'chat';
-		this.#statusTopic = topicPrefix + 'status';
-		this.#mqttThen = mkPromiseChain(client);
-		this.#mqttThen(client => client.connect({
-			will: {
-				topic: this.#statusTopic,
-				payload: textEncoder.encode("offline"),
-				retain: true,
-			}
-		}));
-		this.#mqttThen(client => client.publish(this.#statusTopic, 'online', { retain: true }));
-	}
-	info(text:string) {
-		return ignoreResult(this.#mqttThen(client => client.publish(this.#chatTopic, text)));
-	}
-	update(topic:string, payload:string, retain=false) {
-		return ignoreResult(this.#mqttThen(client =>
-			client.publish(`${this.#topicPrefix}${topic}`, payload, {retain})
-		));
-	}
-}
-
-function addTrailingSlash(path:string) : string {
-	if( path == '' ) return path;
-	if( path.endsWith('/') ) return path;
-	return path + '/';
+function dirPathToPrefix(path:string, zeroCase:string) : string {
+	return path.length == 0 ? zeroCase : path.endsWith('/') ? path : path + '/';
 }
 
 function makeLogger(spec:TargetSpec) : Logger {
@@ -439,7 +355,7 @@ function makeLogger(spec:TargetSpec) : Logger {
 				protocolVersion: Mqtt.ProtocolVersion.MQTT_V3_1_1,
 				keepAlive: 30,	
 			});
-			return new MQTTLogger(client, addTrailingSlash(spec.topic));
+			return new MQTTLogger(client, dirPathToPrefix(spec.topic, ''));
 		}
 		case "Debug": {
 			return new ConsoleLogger(console);
@@ -450,7 +366,7 @@ function makeLogger(spec:TargetSpec) : Logger {
 	}
 }
 
-function makeMultiLogger(specs:TargetSpec[]) {
+export function makeMultiLogger(specs:TargetSpec[]) {
 	const loggers : Logger[] = specs.map(makeLogger);
 	return (
 		loggers.length == 0 ? NULL_LOGGER :

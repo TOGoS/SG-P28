@@ -17,14 +17,17 @@
 //   (prefix)readers/(reader name)/target/set :: URI of target, e.g. osc+udp://localhost:1234/WBB-1/
 //   (prefix)readers/(reader name)/inputpath/set :: path to /dev/input/eventX
 
-import { MqttClient } from "jsr:@ymjacky/mqtt5@0.0.19";
+import { MqttClient, MqttPackets } from "jsr:@ymjacky/mqtt5@0.0.19";
 import { parseTargetSpec, TargetSpec } from "./src/main/ts/sink/sinkspec.ts";
 import ProcessGroup from "./src/main/ts/process/ProcessGroup.ts";
 import ProcessLike from "./src/main/ts/process/ProcessLike.ts";
 import Consumer from "./src/main/ts/sink/Consumer.ts";
 import InputEvent, { decodeInputEvent, EVENT_SIZE } from "./src/main/ts/InputEvent.ts";
-import { functionToProcessLike2 } from "./src/main/ts/process/util.ts";
+import { functionToProcessLike, functionToProcessLike2 } from "./src/main/ts/process/util.ts";
 import { toChunkIterator, toFixedSizeChunks } from "./src/main/ts/streamiter.ts";
+import { MQTTLogger } from "./src/main/ts/mqtt/MQTTLogger.ts";
+import { ConsoleLogger, MultiLogger } from "./src/main/ts/lerg/loggers.ts";
+import { RESOLVED_PROMISE } from "./src/main/ts/promises.ts";
 
 type FilePath = string;
 type URI = string;
@@ -35,6 +38,7 @@ interface Logger {
 }
 
 const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 
 interface MultiOscifyConfig {
 	controllerSpec : TargetSpec;
@@ -74,6 +78,11 @@ interface OSCifier {
 	currentProcess? : OSCifierProcess;
 }
 
+// Take a 'directory path' and append a '/' if needed so that the return value can serve as a prefix
+function dirPathToPrefix(path:string, zeroCase:string) : string {
+	return path.length == 0 ? zeroCase : path.endsWith('/') ? path : path + '/';
+}
+
 function spawnOscifier(devicePath : FilePath, eventSink : Consumer<InputEvent> ) : OSCifierProcess {
 	return functionToProcessLike2<OSCifierProcess>(
 		pl => {
@@ -96,7 +105,6 @@ function spawnOscifier(devicePath : FilePath, eventSink : Consumer<InputEvent> )
 				eventCount += 1;
 				const dataView = new DataView(chunk.buffer, 0, chunk.byteLength);
 				const event = decodeInputEvent(dataView, littleEndian);
-				//console.log(`Event: ${JSON.stringify(event)}`);
 				eventSink.accept(event);
 				
 				minValue = Math.min(minValue, event.value);
@@ -113,7 +121,7 @@ class OSCifierControl extends ProcessGroup {
 	#logger : Logger;
 	#eventSinkSource : (uri:URI)=>Consumer<InputEvent>;
 	
-	constructor( logger: Logger, eventSinkSource:((uri:URI) => Consumer<InputEvent>), opts:{id?:string}={} ) {
+	constructor( logger: Logger, eventSinkSource:((uri:URI) => Consumer<InputEvent>), opts:{id?:string, abortController?:AbortController}={} ) {
 		super(opts);
 		this.#logger = logger;
 		this.#eventSinkSource = eventSinkSource;
@@ -148,27 +156,41 @@ class OSCifierControl extends ProcessGroup {
 			osc.currentProcess?.kill("SIGTERM");
 			// TODO: Publush status (and stats, somehow) of current process
 			if( targetConfig.inputPath != undefined && targetConfig.targetUri != undefined ) {
-				setTimeout(() => { // 'Throttle/debounce changes'
+				setTimeout(async () => { // 'Throttle/debounce changes'
 					// If it has been changed again, abort this update:
 					if( osc.targetConfig != targetConfig ) return;
 					
 					// Otherwise, make target current:
-					// TODO: Maybe wait for current process to exit before spawning a new one?
 					osc.currentConfig = osc.targetConfig;
+					this.#logger.update(`readers/${readerName}/inputpath`, osc.currentConfig.inputPath!);
+					this.#logger.update(`readers/${readerName}/target`, osc.currentConfig.targetUri!);
+					
+					if( osc.currentProcess != undefined ) {
+						this.#logger.info(`Waiting for old reader proces ('${osc.currentProcess.name}') to exit`)
+						await osc.currentProcess.wait();
+					}
+					
+					this.#logger.info(`Spawning oscifier from ${targetConfig.inputPath} to ${targetConfig.targetUri}`);
 					osc.currentProcess = this.#spawnOscifier(targetConfig.inputPath!, targetConfig.targetUri!);
 				}, 200);
 			};
 		}
 	}
 	
-	handleMessage(topic:string, payload:string) : Promise<void> {
+	async handleMessage(topic:string, payload:string) : Promise<void> {
 		let m : RegExpExecArray | null;
-		if( (m = /^readers\/([^\/]+)\/(target|inputpath)\/set$/.exec(topic)) != null ) {
+		if( topic == 'stop' ) {
+			// TODO: Could accept exit code as arg, just as a test that that works
+			await this.#logger.info("Received stop command; exiting with code 0");
+			this.exit(0);
+		} else if( (m = /^readers\/([^\/]+)\/(target|inputpath)\/set$/.exec(topic)) != null ) {
 			const readerName = m[1];
 			const propName = m[2] == "target" ? "targetUri" : "inputPath";
 			this.setReaderProp(readerName, propName, payload);
+		} else {
+			// TODO: Ignore own output messages
+			this.#logger.info(`Unrecognized topic: ${topic}`);
 		}
-		console.log("TODO: Make sure a read3er is running?");
 		return Promise.resolve();
 	}
 }
@@ -180,34 +202,81 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 		return 1;
 	}
 	const port = config.controllerSpec.targetPort ?? 1883;
-	const topicPrefix = config.controllerSpec.topic;
+	const topicPrefix = dirPathToPrefix(config.controllerSpec.topic, '');
 	const readersTopic = `${topicPrefix}readers`;
+	const exitTopic = `${topicPrefix}exit`;
 	const statusTopic  = `${topicPrefix}status`;
 	const mqttClient = new MqttClient({url: new URL(`mqtt://${config.controllerSpec.targetHostname}:${port}`)});
-	await mqttClient.connect({
-		will: {
-			topic: statusTopic,
-			payload: textEncoder.encode("offline"),
+	const mqttLogger = new MQTTLogger(mqttClient, topicPrefix);
+	await mqttLogger.connect();
+	
+	// Identify topics we should ignore becaue we published them!
+	function isOwnTopic(topic:string) {
+		if(topic.endsWith('/chat')) return true;
+		if(topic == statusTopic) return true;
+		return false;
+	}
+	
+	const logger = new MultiLogger([
+		new ConsoleLogger(console),
+		mqttLogger
+	]);
+	
+	const eventSinkSource : (uri:string) => Consumer<InputEvent> = uri => {
+		return {
+			accept: inputEvent => {
+				logger.info(`TODO: handle this input event to ${uri}`);
+			}
 		}
-	});
+	}
 	
-	await mqttClient.subscribe(readersTopic);
+	const control = new OSCifierControl(logger, eventSinkSource);
+	control.addChild(functionToProcessLike(async sig => {
+		const onPublish = (evt : CustomEvent<MqttPackets.PublishPacket>) => {
+			const topic = evt.detail.topic;
+			if( isOwnTopic(topic) ) {
+				// Ignore!
+			} else if( topic.startsWith(topicPrefix) ) {
+				const subTopic = topic.substring(topicPrefix.length);
+				logger.info(`mqttReader: Got oscifier control message from MQTT, subtopic '${subTopic}'`)
+				control.handleMessage(subTopic, textDecoder.decode(evt.detail.payload))
+			} else {
+				logger.info(`mqttReader: Got unexpected message on ${topic}`);
+			}
+		};
+		
+		logger.info(`mqttReader: Registering publish handler`);
+		mqttClient.on('publish', onPublish);
+		
+		const subscribeTopics = [`${topicPrefix}stop`, `${readersTopic}/+/inputpath/set`, `${readersTopic}/+/target/set`];
+		for( const subtop of subscribeTopics ) {
+			logger.info(`mqttReader: Subscribing to ${subtop}...`);
+			await mqttClient.subscribe(subtop);
+		}
+		
+		mqttClient.publish(statusTopic, "online");
+		const waitForAbort = new Promise((resolve,reject) => {
+			logger.info(`mqttReader: waiting for abort signal`);
+			sig.addEventListener("abort", (ev) => {
+				reject("aborted");
+			})
+		});
+		
+		try {
+			await waitForAbort;
+		} finally {
+			mqttClient.off('publish', onPublish);
+		}
+		return 1; // This process can only be crashed
+	}, {name: "MQTT control reader"}));
 	
-	mqttClient.on('publish', evt => {
-		// TODO something with topic and payload
-		evt.detail.topic // 
-	});
-	
-	mqttClient.publish(statusTopic, "online");
-	
-	// TODO: Start a OSCifierControl, blah blah
-	console.log("TODO: Start a OSCifierControl, wait for it to finish (which might be forever)")
-	
-	return 0;
+	return control.wait();
 }
 
 if( import.meta.main ) {
 	const config = parseArgs(Deno.args);
 	const ac = new AbortController();
-	Deno.exit(await main(ac.signal, config));
+	const exitCode = await main(ac.signal, config);
+	console.log(`# ${import.meta.filename}: Exiting with code ${exitCode}`);
+	Deno.exit(exitCode);
 }

@@ -44,13 +44,13 @@ export function functionToProcessLike2<T extends ProcessLike>(
 		prom = prom.catch( e => onErr(e) );
 	} else {
 		prom = prom.catch( e => {
-			console.error(`Default error handler for ${name}: caught ${e}`);
+			console.error(`# ${functionToProcessLike2.name}: Default error handler for ${name}: caught ${e}`);
 			return 1;
 		});
 	}
 	return proc;
 }
 
-export function functionToProcessLike(fn:(this:ProcessLike, signal:AbortSignal) => Promise<number>, opts:FunctionToProcessLikeOpts) {
+export function functionToProcessLike(fn:(this:ProcessLike, signal:AbortSignal) => Promise<number>, opts?:FunctionToProcessLikeOpts) {
 	return functionToProcessLike2(p => p, fn, opts);
 }

@@ -188,6 +188,7 @@ class WBBConnectorV2 extends ProcessGroup {
 								logger: {
 									info: (message:string) => this.#logger.info(`attemptToConnect("${devState.macAddress}"): ${message}`),
 									update: (topic:string, payload:string, persist:boolean=false) => this.#logger.update(`${devTopicPrefix}/${topic}`, payload, persist),
+									subLogger: (_path) => { throw new Error("No subloggers here lmao") },
 								}
 							}
 						);
@@ -332,13 +333,9 @@ import { Mqtt, MqttClient } from 'jsr:@ymjacky/mqtt5@0.0.19';
 import { parseTargetSpec, TargetSpec } from './src/main/ts/sink/sinkspec.ts';
 import Logger from './src/main/ts/lerg/Logger.ts';
 import { ConsoleLogger, MultiLogger, NULL_LOGGER } from './src/main/ts/lerg/loggers.ts';
-import { ignoreResult, RESOLVED_PROMISE } from './src/main/ts/promises.ts';
 import { MQTTLogger } from './src/main/ts/mqtt/MQTTLogger.ts';
+import { dirPathToPrefix } from './src/main/ts/pathutil.ts';
 export const textEncoder = new TextEncoder();
-
-function dirPathToPrefix(path:string, zeroCase:string) : string {
-	return path.length == 0 ? zeroCase : path.endsWith('/') ? path : path + '/';
-}
 
 function makeLogger(spec:TargetSpec) : Logger {
 	switch(spec.type) {
@@ -432,7 +429,7 @@ function spawn(args:string[]) : ProcessLike {
 	} else if( args[0] == "v2" ) {
 		return spawnWbbConnectorV2(args.slice(1));
 	} else {
-		return functionToProcessLike(async (_sig) => {
+		return functionToProcessLike((_sig) => {
 			console.error(`Unrecognized command: '${args[0]}'`);
 			return Promise.resolve(1);
 		});

@@ -27,17 +27,12 @@ import { functionToProcessLike, functionToProcessLike2 } from "./src/main/ts/pro
 import { toChunkIterator, toFixedSizeChunks } from "./src/main/ts/streamiter.ts";
 import { MQTTLogger } from "./src/main/ts/mqtt/MQTTLogger.ts";
 import { ConsoleLogger, MultiLogger } from "./src/main/ts/lerg/loggers.ts";
-import { RESOLVED_PROMISE } from "./src/main/ts/promises.ts";
+import { dirPathToPrefix } from "./src/main/ts/pathutil.ts";
+import Logger from "./src/main/ts/lerg/Logger.ts";
 
 type FilePath = string;
 type URI = string;
 
-interface Logger {
-	info(message:string) : Promise<void>;
-	update(topic:string, payload:string, retain?:boolean) : Promise<void>;
-}
-
-const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 interface MultiOscifyConfig {
@@ -78,12 +73,7 @@ interface OSCifier {
 	currentProcess? : OSCifierProcess;
 }
 
-// Take a 'directory path' and append a '/' if needed so that the return value can serve as a prefix
-function dirPathToPrefix(path:string, zeroCase:string) : string {
-	return path.length == 0 ? zeroCase : path.endsWith('/') ? path : path + '/';
-}
-
-function spawnOscifier(devicePath : FilePath, eventSink : Consumer<InputEvent> ) : OSCifierProcess {
+function spawnOscifier(devicePath : FilePath, eventSink : Consumer<InputEvent>, logger : Logger ) : OSCifierProcess {
 	return functionToProcessLike2<OSCifierProcess>(
 		pl => {
 			const obj = Object.create(pl);
@@ -91,24 +81,48 @@ function spawnOscifier(devicePath : FilePath, eventSink : Consumer<InputEvent> )
 			return obj;
 		},
 		async abortSignal => {
-			using instream = await Deno.open(devicePath, { read: true });
-			const inreadable = instream.readable.getReader();
-			abortSignal.addEventListener('abort', () => inreadable.cancel());
-			
-			let byteCount = 0;
-			let eventCount = 0;
-			let minValue = Infinity;
-			let maxValue = +Infinity;
 			const littleEndian = true; // May need to override?
-			for await(const chunk of toFixedSizeChunks(EVENT_SIZE, toChunkIterator(inreadable))) {
-				byteCount += chunk.length;
-				eventCount += 1;
-				const dataView = new DataView(chunk.buffer, 0, chunk.byteLength);
-				const event = decodeInputEvent(dataView, littleEndian);
-				eventSink.accept(event);
-				
-				minValue = Math.min(minValue, event.value);
-				maxValue = Math.max(maxValue, event.value);
+			logger.info(`Opening ${devicePath}...`);
+			using instream = await Deno.open(devicePath, { read: true });
+			logger.info(`${devicePath} opened!`);
+			const inreadable = instream.readable.getReader();
+			abortSignal.addEventListener('abort', () => {
+				logger.info(`Received abort signal; cancelling reader`);
+				inreadable.cancel()
+			});
+			
+			let statpubtimer : number|undefined;
+			try {
+				logger.update('status','online');
+				let byteCount = 0;
+				let eventCount = 0;
+				let minValue = Infinity;
+				let maxValue = -Infinity;
+				const finiteNumToStr = function(num:number) : string {
+					return isFinite(num) ? "" + num : "";
+				}
+				const publishStats = function() {
+					logger.update('stats/bytesread', ""+byteCount);
+					logger.update('stats/eventsread', ""+eventCount);
+					logger.update('stats/maxvalue', finiteNumToStr(maxValue));
+					logger.update('stats/minvalue', finiteNumToStr(minValue));
+				}
+				statpubtimer = setInterval(() => {
+					publishStats();
+				}, 1000);
+				for await(const chunk of toFixedSizeChunks(EVENT_SIZE, toChunkIterator(inreadable))) {
+					byteCount += chunk.length;
+					eventCount += 1;
+					const dataView = new DataView(chunk.buffer, 0, chunk.byteLength);
+					const event = decodeInputEvent(dataView, littleEndian);
+					eventSink.accept(event);
+					
+					minValue = Math.min(minValue, event.value);
+					maxValue = Math.max(maxValue, event.value);
+				}
+			} finally {
+				logger.update('status','offline');
+				if(statpubtimer != undefined) clearInterval(statpubtimer);
 			}
 			
 			return 0;
@@ -127,9 +141,9 @@ class OSCifierControl extends ProcessGroup {
 		this.#eventSinkSource = eventSinkSource;
 	}
 	
-	#spawnOscifier(devicePath:string, targetUri:URI) : OSCifierProcess {
+	#spawnOscifier(name:string, devicePath:string, targetUri:URI) : OSCifierProcess {
 		const sink = this.#eventSinkSource(targetUri);
-		const oscifier = spawnOscifier(devicePath, sink);
+		const oscifier = spawnOscifier(devicePath, sink, this.#logger.subLogger(`readers/${name}`));
 		this.addChild(oscifier);
 		return oscifier;
 	}
@@ -153,7 +167,10 @@ class OSCifierControl extends ProcessGroup {
 			// Target changed!  Kill current process, wait for target to stop changing, and restart.
 			const targetConfig = {...osc.targetConfig, [propName]: value};
 			osc.targetConfig = targetConfig;
-			osc.currentProcess?.kill("SIGTERM");
+			if( osc.currentProcess != undefined ) {
+				this.#logger.info(`Killing old reader process (${osc.currentProcess.id} / '${osc.currentProcess.name}')`)
+				osc.currentProcess.kill("SIGTERM");
+			}
 			// TODO: Publush status (and stats, somehow) of current process
 			if( targetConfig.inputPath != undefined && targetConfig.targetUri != undefined ) {
 				setTimeout(async () => { // 'Throttle/debounce changes'
@@ -166,12 +183,12 @@ class OSCifierControl extends ProcessGroup {
 					this.#logger.update(`readers/${readerName}/target`, osc.currentConfig.targetUri!);
 					
 					if( osc.currentProcess != undefined ) {
-						this.#logger.info(`Waiting for old reader proces ('${osc.currentProcess.name}') to exit`)
+						this.#logger.info(`Waiting for old reader proces (${osc.currentProcess.id} / '${osc.currentProcess.name}') to exit`)
 						await osc.currentProcess.wait();
 					}
 					
 					this.#logger.info(`Spawning oscifier from ${targetConfig.inputPath} to ${targetConfig.targetUri}`);
-					osc.currentProcess = this.#spawnOscifier(targetConfig.inputPath!, targetConfig.targetUri!);
+					osc.currentProcess = this.#spawnOscifier(readerName, targetConfig.inputPath!, targetConfig.targetUri!);
 				}, 200);
 			};
 		}
@@ -204,7 +221,6 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 	const port = config.controllerSpec.targetPort ?? 1883;
 	const topicPrefix = dirPathToPrefix(config.controllerSpec.topic, '');
 	const readersTopic = `${topicPrefix}readers`;
-	const exitTopic = `${topicPrefix}exit`;
 	const statusTopic  = `${topicPrefix}status`;
 	const mqttClient = new MqttClient({url: new URL(`mqtt://${config.controllerSpec.targetHostname}:${port}`)});
 	const mqttLogger = new MQTTLogger(mqttClient, topicPrefix);

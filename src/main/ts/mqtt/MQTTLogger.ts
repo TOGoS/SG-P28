@@ -33,4 +33,8 @@ export class MQTTLogger implements Logger {
 	update(topic: string, payload: string, retain = false) {
 		return ignoreResult(this.#mqttThen(client => client.publish(`${this.#topicPrefix}${topic}`, payload, { retain })));
 	}
+	
+	subLogger(path: string): Logger {
+	  return new MQTTLogger(this.#client, this.#topicPrefix + path + '/');
+	}
 }

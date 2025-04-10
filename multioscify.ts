@@ -1,7 +1,5 @@
-//// TODO: rewrite all that to do multiple thingies
-
 // This program will take options:
-//   --topic=mqtt://localhost:1883/(mytopic)/
+//   --control-root=mqtt://localhost:1883/(mytopic)/
 //   --udp-local-port=1234
 // MQTT topics (output):
 //   (prefix)status :: status of this process ("online" or "offline")
@@ -41,7 +39,7 @@ function parseArgs(argv:string[]) : MultiOscifyConfig {
 	let udpLocalPort : number|undefined;
 	for( const arg of argv ) {
 		let m : RegExpExecArray|null;
-		if( (m = /^--controller=(.*)$/.exec(arg)) != null ) {
+		if( (m = /^--control-root=(.*)$/.exec(arg)) != null ) {
 			controllerSpec = parseTargetSpec(m[1]);
 		} else if( (m = /^--udp-local-port=(\d+)$/.exec(arg)) != null ) {
 			udpLocalPort = +m[1];
@@ -49,7 +47,7 @@ function parseArgs(argv:string[]) : MultiOscifyConfig {
 			throw new Error(`Unrecognized argument: '${arg}'`);
 		}
 	}
-	if( controllerSpec == undefined ) throw new Error("--controller unspecified");
+	if( controllerSpec == undefined ) throw new Error("--control-root unspecified");
 	if( udpLocalPort == undefined ) throw new Error("--udp-local-port unspecified");
 	return { controllerSpec, udpLocalPort };
 }

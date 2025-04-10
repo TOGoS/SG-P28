@@ -191,6 +191,7 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 	mqttClient.publish(statusTopic, "online");
 	
 	// TODO: Start a OSCifierControl, blah blah
+	console.log("TODO!")
 	
 	return 0;
 }

@@ -7,30 +7,25 @@ it over OSC, for the purpose of having a group of cheap linux boxen
 (maybe Raspberry Pis) collect events from a swarm of balance boards
 to control some music or something.
 
-Options in flux.
-
-As of v0.28.28, can only read from one board per process.
-
-Planned features:
-- Automatically detect new boards as they are added
-- Some board identification routine
-  (maybe you step on each board in order).
 
 ## wbbconnector.ts
 
 A Deno script that will talk to bluetoothd over D-bus to automatically
 connect to a preconfigured list of bluetooth devices,
 watch for their corresponding `/dev/input/event*` device file to appear,
-and start reading events from them.
+and log information to the specified `--logger`, which may be an MQTT channel.
 
 To run:
 
 ```
-deno run --unstable-net --check=all --allow-all wbbconnector.ts v2 "--target=osc+udp://192.168.9.9:9901;debug=on/wbb" "00:21:BD:D1:5C:A9" "58:BD:A3:AC:20:AD"
+deno run --unstable-net --check=all --allow-all wbbconnector.ts v2 "--logger=mqtt://localhost/wbbconnector1" "00:21:BD:D1:5C:A9" "58:BD:A3:AC:20:AD"
 ```
 
 Replace `192.168.9.9:9901` with the host:port to which you want to send OSC packets.
 Replace the MAC addresses with those of whatever devices you want to connect.
+
+More tan one logger may be specified.
+`--logger=console` to print information to standard output.
 
 To connect the Wii Balance Boards, start `wbbconnector`,
 then power the on and hit the red button on the bottom of each.
@@ -56,19 +51,27 @@ and eventually some stuff like
 # wbb-connector-v2: readEvents(/dev/input/event3): Opening '/dev/input/event3'...
 ```
 
-and, if/when it successfully reads some events (because you're pushing on the pressure pads):
-
-```
-# target: sendUdp: Sent UDP packet to {"transport":"udp","hostname":"192.168.9.9","port":9901}: 2f7762622f35383a42443a41333a41433a32303a41442f32000000002c690000000001cd
-```
-
-or similar.
+Once a device is connected, pass its MAC address and input path to `oscify.ts` or `multioscify.ts`.
 
 
-Currently this program crashes after a device disconnects.
+## multioscify.ts
+
+Can read from multiple WBBs and forward events over OSC.
+Forwarding configuration (input device -> OSC target) is controlled via MQTT.
+
 
 ## FAQ
 
 ### I get Permission Denied errors when I try to read from /dev/input/eventN devices!
 
 Maybe try `usermod -a -G input $your_username`.
+
+
+## TODO
+
+- [ ] `restart` option for readers
+- [ ] maybe readers should allow multiple targets?
+  - shouldn't need to restart reader when target changes
+- [ ] An orchestrator that automatically controls `multioscify` based on path guesses from `wbbconnector`
+  - Probably will want to use shared environment variables defined in a `.env.sh` to configure
+    all these things

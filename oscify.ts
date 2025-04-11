@@ -53,13 +53,13 @@ for( const arg of Deno.args ) {
 const eventSinks = [];
 for( const targetSpec of targetSpecs ) {
 	const target = parseTargetSpec(targetSpec);
-	if (target.type === "Debug") {
+	if (target.type === "Console") {
 		eventSinks.push({
 			accept(item: InputEvent) {
 				console.log(`input-event type=${item.type} code=${item.code} value=${item.value}`);
 			}
 		});
-	} else if (target.type === "OSC+Debug") {
+	} else if (target.type === "OSC+Console") {
 		eventSinks.push(new InputEventToOSCSink({
 			accept(item: OSCMessage) {
 				console.log(`osc-packet ${uint8ArrayToHex(item.marshal())}`);

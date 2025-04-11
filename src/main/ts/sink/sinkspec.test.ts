@@ -3,12 +3,12 @@ import { parseTargetSpec, TargetSpec } from "./sinkspec.ts";
 
 Deno.test("parse target spec debug", () => {
 	const target = parseTargetSpec("debug");
-	assertEquals(target, {type:"Debug"});
+	assertEquals(target, {type:"Console"});
 });
 
 Deno.test("parse target spec osc+debug", () => {
 	const target = parseTargetSpec("osc+debug:/some/path");
-	assertEquals(target, {type:"OSC+Debug", path:"/some/path"});
+	assertEquals(target, {type:"OSC+Console", path:"/some/path"});
 });
 
 Deno.test("parse simplest target spec osc+udp", () => {

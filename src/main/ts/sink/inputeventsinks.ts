@@ -15,11 +15,11 @@ export function makeInputEventSink(target:TargetSpec, opts : {
 	datagramConnPromise : PromiseLike<Deno.DatagramConn>,
 	chanStats?: Map<string,number>,
 }) : (evt:InputEvent) => void {
-	if (target.type === "Debug") {
+	if (target.type === "Console") {
 		return (item: InputEvent) => {
 			console.log(`input-event type=${item.type} code=${item.code} value=${item.value}`);
 		};
-	} else if (target.type === "OSC+Debug") {
+	} else if (target.type === "OSC+Console") {
 		return consumerToCallable(new InputEventToOSCSink({
 			accept(item: OSCMessage) {
 				console.log(`osc-packet ${uint8ArrayToHex(item.marshal())}`);

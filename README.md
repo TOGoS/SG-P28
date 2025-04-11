@@ -59,6 +59,8 @@ Once a device is connected, pass its MAC address and input path to `oscify.ts` o
 Can read from multiple WBBs and forward events over OSC.
 Forwarding configuration (input device -> OSC target) is controlled via MQTT.
 
+See [multioscify-demo](./multioscify-demo) for usage example.
+
 
 ## FAQ
 

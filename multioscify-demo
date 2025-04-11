@@ -1,3 +1,6 @@
 #!/bin/bash
 
-exec ./looper deno run --unstable-net --check=all -A ./multioscify.ts --control-root=mqtt://localhost/multioscify1 --udp-local-port="0.0.0.0:12301"
+exec ./looper deno run --unstable-net --check=all -A ./multioscify.ts \
+	--control-root=mqtt://localhost/multioscify1 \
+	--logger=console \
+	--udp-local-port="0.0.0.0:12301"

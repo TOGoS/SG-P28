@@ -25,11 +25,12 @@ import InputEvent, { decodeInputEvent, EVENT_SIZE } from "./src/main/ts/InputEve
 import { functionToProcessLike, functionToProcessLike2 } from "./src/main/ts/process/util.ts";
 import { toChunkIterator, toFixedSizeChunks } from "./src/main/ts/streamiter.ts";
 import { MQTTLogger } from "./src/main/ts/mqtt/MQTTLogger.ts";
-import { ConsoleLogger, MultiLogger } from "./src/main/ts/lerg/loggers.ts";
+import { MultiLogger } from "./src/main/ts/lerg/loggers.ts";
 import { dirPathToPrefix } from "./src/main/ts/pathutil.ts";
 import Logger from "./src/main/ts/lerg/Logger.ts";
 import { makeInputEventSink } from "./src/main/ts/sink/inputeventsinks.ts";
 import { assertEquals } from "https://deno.land/std@0.165.0/testing/asserts.ts";
+import { makeLogger } from "./src/main/ts/lerg/makelogger.ts";
 
 type FilePath = string;
 type URI = string;
@@ -38,6 +39,7 @@ const textDecoder = new TextDecoder();
 
 interface MultiOscifyConfig {
 	controllerSpec : TargetSpec;
+	loggerSpecs : TargetSpec[];
 	udpLocalHostname? : string;
 	udpLocalPort : number;
 }
@@ -46,10 +48,13 @@ function parseArgs(argv:string[]) : MultiOscifyConfig {
 	let controllerSpec : TargetSpec|undefined;
 	let udpLocalHostname : string|undefined;
 	let udpLocalPort : number|undefined;
+	const loggerSpecs : TargetSpec[] = [];
 	for( const arg of argv ) {
 		let m : RegExpExecArray|null;
 		if( (m = /^--control-root=(.*)$/.exec(arg)) != null ) {
 			controllerSpec = parseTargetSpec(m[1]);
+		} else if( (m = /^--logger=(.*)$/.exec(arg)) != null ) {
+			loggerSpecs.push(parseTargetSpec(m[1]));
 		} else if( (m = /^--udp-local-port=(\d+)$/.exec(arg)) != null ) {
 			udpLocalPort = +m[1];
 		} else if( (m = /^--udp-local-port=(?:\[(?<hostname>[^\]]+)\]|(?<hostname>[^\[\]:]+)):(?<port>\d+)$/.exec(arg)) != null ) {
@@ -61,13 +66,14 @@ function parseArgs(argv:string[]) : MultiOscifyConfig {
 	}
 	if( controllerSpec == undefined ) throw new Error("--control-root unspecified");
 	if( udpLocalPort == undefined ) throw new Error("--udp-local-port unspecified");
-	return { controllerSpec, udpLocalHostname, udpLocalPort };
+	return { controllerSpec, loggerSpecs, udpLocalHostname, udpLocalPort };
 }
 
 Deno.test("parse UDP local port without host ", () => {
 	const parsed = parseArgs(['--control-root=debug', '--udp-local-port=1234']);
 	const expected : MultiOscifyConfig = {
 		controllerSpec: { type: "Console" },
+		loggerSpecs: [],
 		udpLocalHostname: undefined,
 		udpLocalPort: 1234,
 	}
@@ -78,6 +84,7 @@ Deno.test("parse UDP local port with unbracketed host", () => {
 	const parsed = parseArgs(['--control-root=debug', '--udp-local-port=foo.com:1234']);
 	const expected : MultiOscifyConfig = {
 		controllerSpec: { type: "Console" },
+		loggerSpecs: [],
 		udpLocalHostname: 'foo.com',
 		udpLocalPort: 1234,
 	}
@@ -88,6 +95,7 @@ Deno.test("parse UDP local port with bracketed host", () => {
 	const parsed = parseArgs(['--control-root=debug', '--udp-local-port=[0::0]:1234']);
 	const expected : MultiOscifyConfig = {
 		controllerSpec: { type: "Console" },
+		loggerSpecs: [],
 		udpLocalHostname: '0::0',
 		udpLocalPort: 1234,
 	}
@@ -272,7 +280,7 @@ function memoize<I,O>(func : (i:I)=>O) : (i:I)=>O {
 }
 
 // TODO: Have this return a ProcessLike
-// TODO: Allow secondary `--logger`s to be specified, same as wbbconnector
+// Would be nice: Allow control by means other than MQTT, e.g. MQTT-like commands on console!
 async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number> {
 	if( config.controllerSpec.type != "MQTT" ) {
 		console.error(`Only 'mqtt' controller supported`);
@@ -294,8 +302,8 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 	}
 	
 	const logger = new MultiLogger([
-		new ConsoleLogger(console),
-		mqttLogger
+		mqttLogger,
+		...config.loggerSpecs.map(makeLogger)
 	]);
 	
 	const udpLocalPortProm = new LazyPromise<Deno.DatagramConn>((resolve,reject) => {

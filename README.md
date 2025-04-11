@@ -71,7 +71,6 @@ Maybe try `usermod -a -G input $your_username`.
 
 ## TODO
 
-- [ ] `restart` option for readers
 - [ ] maybe readers should allow multiple targets?
   - shouldn't need to restart reader when target changes
 - [ ] An orchestrator that automatically controls `multioscify` based on path guesses from `wbbconnector`

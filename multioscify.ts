@@ -272,6 +272,7 @@ function memoize<I,O>(func : (i:I)=>O) : (i:I)=>O {
 }
 
 // TODO: Have this return a ProcessLike
+// TODO: Allow secondary `--logger`s to be specified, same as wbbconnector
 async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number> {
 	if( config.controllerSpec.type != "MQTT" ) {
 		console.error(`Only 'mqtt' controller supported`);

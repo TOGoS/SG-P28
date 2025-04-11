@@ -5,8 +5,8 @@ import InputEvent, { EV_ABS, ABS_HAT0X, ABS_HAT1X, ABS_HAT0Y, ABS_HAT1Y } from "
 export class InputEventToOSCSink implements Consumer<InputEvent> {
 	#oscSink: Consumer<OSCMessage>;
 	#path: string;
-	#chanStats: Map<string,number>;
-	constructor(oscSink: Consumer<OSCMessage>, path: string, chanStats : Map<string,number>) {
+	#chanStats: Map<string,number>|undefined;
+	constructor(oscSink: Consumer<OSCMessage>, path: string, chanStats? : Map<string,number>) {
 		this.#oscSink = oscSink;
 		this.#path = path;
 		this.#chanStats = chanStats;
@@ -23,7 +23,9 @@ export class InputEventToOSCSink implements Consumer<InputEvent> {
 			if (weightIdx >= 0) {
 				// this.weights[weightIdx] = event.value;
 				const destPath = this.#path + "/" + weightIdx;
-				this.#chanStats.set(destPath, (this.#chanStats.get(destPath) || 0) + 1);
+				if( this.#chanStats != undefined ) {
+					this.#chanStats.set(destPath, (this.#chanStats.get(destPath) || 0) + 1);
+				}
 				this.#oscSink.accept(new OSCMessage(destPath).append(event.value));
 			}
 		}

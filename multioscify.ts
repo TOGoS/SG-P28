@@ -21,7 +21,6 @@ import { MqttClient, MqttPackets } from "jsr:@ymjacky/mqtt5@0.0.19";
 import { parseTargetSpec, TargetSpec } from "./src/main/ts/sink/sinkspec.ts";
 import ProcessGroup from "./src/main/ts/process/ProcessGroup.ts";
 import ProcessLike from "./src/main/ts/process/ProcessLike.ts";
-import Consumer from "./src/main/ts/sink/Consumer.ts";
 import InputEvent, { decodeInputEvent, EVENT_SIZE } from "./src/main/ts/InputEvent.ts";
 import { functionToProcessLike, functionToProcessLike2 } from "./src/main/ts/process/util.ts";
 import { toChunkIterator, toFixedSizeChunks } from "./src/main/ts/streamiter.ts";
@@ -29,6 +28,8 @@ import { MQTTLogger } from "./src/main/ts/mqtt/MQTTLogger.ts";
 import { ConsoleLogger, MultiLogger } from "./src/main/ts/lerg/loggers.ts";
 import { dirPathToPrefix } from "./src/main/ts/pathutil.ts";
 import Logger from "./src/main/ts/lerg/Logger.ts";
+import { makeInputEventSink } from "./src/main/ts/sink/inputeventsinks.ts";
+import { assertEquals } from "https://deno.land/std@0.165.0/testing/asserts.ts";
 
 type FilePath = string;
 type URI = string;
@@ -37,11 +38,13 @@ const textDecoder = new TextDecoder();
 
 interface MultiOscifyConfig {
 	controllerSpec : TargetSpec;
+	udpLocalHostname? : string;
 	udpLocalPort : number;
 }
 
 function parseArgs(argv:string[]) : MultiOscifyConfig {
 	let controllerSpec : TargetSpec|undefined;
+	let udpLocalHostname : string|undefined;
 	let udpLocalPort : number|undefined;
 	for( const arg of argv ) {
 		let m : RegExpExecArray|null;
@@ -49,14 +52,47 @@ function parseArgs(argv:string[]) : MultiOscifyConfig {
 			controllerSpec = parseTargetSpec(m[1]);
 		} else if( (m = /^--udp-local-port=(\d+)$/.exec(arg)) != null ) {
 			udpLocalPort = +m[1];
+		} else if( (m = /^--udp-local-port=(?:\[(?<hostname>[^\]]+)\]|(?<hostname>[^\[\]:]+)):(?<port>\d+)$/.exec(arg)) != null ) {
+			udpLocalHostname = m.groups!['hostname'];
+			udpLocalPort = +m.groups!['port'];
 		} else {
 			throw new Error(`Unrecognized argument: '${arg}'`);
 		}
 	}
 	if( controllerSpec == undefined ) throw new Error("--control-root unspecified");
 	if( udpLocalPort == undefined ) throw new Error("--udp-local-port unspecified");
-	return { controllerSpec, udpLocalPort };
+	return { controllerSpec, udpLocalHostname, udpLocalPort };
 }
+
+Deno.test("parse UDP local port without host ", () => {
+	const parsed = parseArgs(['--control-root=debug', '--udp-local-port=1234']);
+	const expected : MultiOscifyConfig = {
+		controllerSpec: { type: "Debug" },
+		udpLocalHostname: undefined,
+		udpLocalPort: 1234,
+	}
+	assertEquals(parsed, expected);
+});
+
+Deno.test("parse UDP local port with unbracketed host", () => {
+	const parsed = parseArgs(['--control-root=debug', '--udp-local-port=foo.com:1234']);
+	const expected : MultiOscifyConfig = {
+		controllerSpec: { type: "Debug" },
+		udpLocalHostname: 'foo.com',
+		udpLocalPort: 1234,
+	}
+	assertEquals(parsed, expected);
+});
+
+Deno.test("parse UDP local port with bracketed host", () => {
+	const parsed = parseArgs(['--control-root=debug', '--udp-local-port=[0::0]:1234']);
+	const expected : MultiOscifyConfig = {
+		controllerSpec: { type: "Debug" },
+		udpLocalHostname: '0::0',
+		udpLocalPort: 1234,
+	}
+	assertEquals(parsed, expected);
+});
 
 interface OSCifierConfig {
 	inputPath? : string;
@@ -70,7 +106,7 @@ interface OSCifier {
 	currentProcess? : OSCifierProcess;
 }
 
-function spawnOscifier(devicePath : FilePath, eventSink : Consumer<InputEvent>, logger : Logger ) : OSCifierProcess {
+function spawnOscifier(devicePath : FilePath, eventSink : (evt:InputEvent) => void, logger : Logger ) : OSCifierProcess {
 	return functionToProcessLike2<ProcessLike>(
 		pl => pl,
 		async abortSignal => {
@@ -108,7 +144,7 @@ function spawnOscifier(devicePath : FilePath, eventSink : Consumer<InputEvent>, 
 					eventCount += 1;
 					const dataView = new DataView(chunk.buffer, 0, chunk.byteLength);
 					const event = decodeInputEvent(dataView, littleEndian);
-					eventSink.accept(event);
+					eventSink(event);
 					
 					minValue = Math.min(minValue, event.value);
 					maxValue = Math.max(maxValue, event.value);
@@ -126,9 +162,9 @@ function spawnOscifier(devicePath : FilePath, eventSink : Consumer<InputEvent>, 
 class OSCifierControl extends ProcessGroup {
 	#oscifiers : {[name:string]: OSCifier} = {};
 	#logger : Logger;
-	#eventSinkSource : (uri:URI)=>Consumer<InputEvent>;
+	#eventSinkSource : (uri:URI) => (evt:InputEvent) => void;
 	
-	constructor( logger: Logger, eventSinkSource:((uri:URI) => Consumer<InputEvent>), opts:{id?:string, abortController?:AbortController}={} ) {
+	constructor( logger: Logger, eventSinkSource:((uri:URI) => (evt:InputEvent) => void), opts:{id?:string, abortController?:AbortController}={} ) {
 		super(opts);
 		this.#logger = logger;
 		this.#eventSinkSource = eventSinkSource;
@@ -206,6 +242,35 @@ class OSCifierControl extends ProcessGroup {
 	}
 }
 
+export default class LazyPromise<T> implements PromiseLike<T> {
+	constructor(protected generator:(resolve:(value:T)=>void, reject:(error:unknown)=>void)=>void) {}
+	
+	protected prom : Promise<T> | undefined;
+	
+	then<TResult1 = T, TResult2 = never>(
+		onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null,
+		// deno-lint-ignore no-explicit-any
+		onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null
+	): PromiseLike<TResult1 | TResult2> {
+		if( this.prom == undefined ) {
+			this.prom = new Promise(this.generator);
+		}
+		return this.prom.then(onfulfilled, onrejected);
+	}
+}
+
+function memoize<I,O>(func : (i:I)=>O) : (i:I)=>O {
+	const cache = new Map<I,O>();
+	return (i:I) => {
+		let cached = cache.get(i);
+		if( cached !== undefined || cache.has(i) ) return cached as O;
+		
+		cached = func(i);
+		cache.set(i, cached);
+		return cached;
+	};
+}
+
 // TODO: Have this return a ProcessLike
 async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number> {
 	if( config.controllerSpec.type != "MQTT" ) {
@@ -232,13 +297,22 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 		mqttLogger
 	]);
 	
-	const eventSinkSource : (uri:string) => Consumer<InputEvent> = uri => {
-		return {
-			accept: inputEvent => {
-				logger.info(`TODO: handle this input event to ${uri}`);
-			}
+	const udpLocalPortProm = new LazyPromise<Deno.DatagramConn>((resolve,reject) => {
+		try {
+			logger.info(`Creating datagram on local host:port ${config.udpLocalHostname}:${config.udpLocalPort}...`);
+			resolve(Deno.listenDatagram({ transport: "udp", port: config.udpLocalPort, hostname: config.udpLocalHostname, reuseAddress: true }));
+			logger.info(`Datagram connection created!`);
+		} catch (e) {
+			reject(e);
 		}
-	}
+	});
+	
+	const eventSinkSource : (uri:string) => (evt:InputEvent) => void = memoize(uri => {
+		const targetSpec = parseTargetSpec(uri);
+		return makeInputEventSink(targetSpec, {
+			datagramConnPromise: udpLocalPortProm
+		});
+	});
 	
 	const control = new OSCifierControl(logger, eventSinkSource);
 	control.addChild(functionToProcessLike(async sig => {
@@ -267,7 +341,7 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 		mqttClient.publish(statusTopic, "online");
 		const waitForAbort = new Promise((resolve,reject) => {
 			logger.info(`mqttReader: waiting for abort signal`);
-			sig.addEventListener("abort", (ev) => {
+			sig.addEventListener("abort", (_ev) => {
 				reject("aborted");
 			})
 		});

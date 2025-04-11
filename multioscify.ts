@@ -339,7 +339,7 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 		}
 		
 		mqttClient.publish(statusTopic, "online");
-		const waitForAbort = new Promise((resolve,reject) => {
+		const waitForAbort = new Promise((_resolve,reject) => {
 			logger.info(`mqttReader: waiting for abort signal`);
 			sig.addEventListener("abort", (_ev) => {
 				reject("aborted");
@@ -353,6 +353,8 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 		}
 		return 1; // This process can only be crashed
 	}, {name: "MQTT control reader"}));
+	
+	sig.addEventListener("abort", () => control.kill("SIGTERM"));
 	
 	return control.wait();
 }

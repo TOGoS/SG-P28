@@ -67,7 +67,7 @@ function parseArgs(argv:string[]) : MultiOscifyConfig {
 Deno.test("parse UDP local port without host ", () => {
 	const parsed = parseArgs(['--control-root=debug', '--udp-local-port=1234']);
 	const expected : MultiOscifyConfig = {
-		controllerSpec: { type: "Debug" },
+		controllerSpec: { type: "Console" },
 		udpLocalHostname: undefined,
 		udpLocalPort: 1234,
 	}
@@ -77,7 +77,7 @@ Deno.test("parse UDP local port without host ", () => {
 Deno.test("parse UDP local port with unbracketed host", () => {
 	const parsed = parseArgs(['--control-root=debug', '--udp-local-port=foo.com:1234']);
 	const expected : MultiOscifyConfig = {
-		controllerSpec: { type: "Debug" },
+		controllerSpec: { type: "Console" },
 		udpLocalHostname: 'foo.com',
 		udpLocalPort: 1234,
 	}
@@ -87,7 +87,7 @@ Deno.test("parse UDP local port with unbracketed host", () => {
 Deno.test("parse UDP local port with bracketed host", () => {
 	const parsed = parseArgs(['--control-root=debug', '--udp-local-port=[0::0]:1234']);
 	const expected : MultiOscifyConfig = {
-		controllerSpec: { type: "Debug" },
+		controllerSpec: { type: "Console" },
 		udpLocalHostname: '0::0',
 		udpLocalPort: 1234,
 	}

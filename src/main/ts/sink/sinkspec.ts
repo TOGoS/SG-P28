@@ -23,9 +23,9 @@ const MQTT_TARGET_REGEX = new RegExp(
 );
 
 export type TargetSpec = {
-	type: "Debug"
+	type: "Console"
 } | {
-	type: "OSC+Debug",
+	type: "OSC+Console",
 	path: string
 } | {
 	type: "OSC+UDP",
@@ -55,11 +55,12 @@ function stripUndefs<T>(obj: T): Partial<T> {
 
 export function parseTargetSpec(targetSpec:string) : TargetSpec {
 	let m : RegExpExecArray|null;
-	if( "debug" == targetSpec ) {
-		return { type: "Debug" };
+	if( "console" == targetSpec || "debug" == targetSpec ) {
+		// 'debug' for backwards compatibility
+		return { type: "Console" };
 	} else if( (m = /^osc\+debug:(?<path>\/.*)$/.exec(targetSpec)) !== null ) {
 		const path : string = m.groups!["path"];
-		return { type: "OSC+Debug", path };
+		return { type: "OSC+Console", path };
 	} else if( (m = OSCUDP_TARGET_REGEX.exec(targetSpec)) !== null ) {
 		// 'bracketedhostname' is to support IPv6 addresses in URIs, like http://[fe80::9908:15:1bb5:39db%18]:1234/some-path
 		// Possibly parsing should be stricter.

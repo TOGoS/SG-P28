@@ -356,11 +356,11 @@ function makeLogger(spec:TargetSpec) : Logger {
 			mqttLogger.connect();
 			return mqttLogger;
 		}
-		case "Debug": {
+		case "Console": {
 			return new ConsoleLogger(console);
 		}
 		default: {
-			throw new Error(`Don't know how to make logger for ${JSON.stringify(spec)}`);
+			throw new Error(`Don't know how to make logger for target spec: ${JSON.stringify(spec)}`);
 		}
 	}
 }

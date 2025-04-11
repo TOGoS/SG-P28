@@ -352,7 +352,9 @@ function makeLogger(spec:TargetSpec) : Logger {
 				protocolVersion: Mqtt.ProtocolVersion.MQTT_V3_1_1,
 				keepAlive: 30,	
 			});
-			return new MQTTLogger(client, dirPathToPrefix(spec.topic, ''));
+			const mqttLogger = new MQTTLogger(client, dirPathToPrefix(spec.topic, ''));
+			mqttLogger.connect();
+			return mqttLogger;
 		}
 		case "Debug": {
 			return new ConsoleLogger(console);

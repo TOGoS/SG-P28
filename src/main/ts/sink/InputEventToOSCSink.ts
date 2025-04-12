@@ -15,6 +15,7 @@ export class InputEventToOSCSink implements Consumer<InputEvent> {
 		if (event.type == EV_ABS) {
 			let weightIdx = -1;
 			switch (event.code) {
+				// TODO: Something with the front button!
 				case ABS_HAT0X: weightIdx = 0; break;
 				case ABS_HAT1X: weightIdx = 1; break;
 				case ABS_HAT0Y: weightIdx = 2; break;

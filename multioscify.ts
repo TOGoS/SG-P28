@@ -167,6 +167,15 @@ function spawnOscifier(devicePath : FilePath, eventSink : (evt:InputEvent) => vo
 	);
 }
 
+function errString(err:any) : string {
+	if( err == undefined ) return "(error object is undefined)";
+	if( typeof(err) == "object" ) {
+		if( err.message ) return err.message;
+		return JSON.stringify(err);
+	}
+	return ""+err;
+}
+
 class OSCifierControl extends ProcessGroup {
 	#oscifiers : {[name:string]: OSCifier} = {};
 	#logger : Logger;
@@ -178,9 +187,18 @@ class OSCifierControl extends ProcessGroup {
 		this.#eventSinkSource = eventSinkSource;
 	}
 	
-	#spawnOscifier(name:string, devicePath:string, targetUri:URI) : OSCifierProcess {
-		const sink = this.#eventSinkSource(targetUri);
-		const oscifier = spawnOscifier(devicePath, sink, this.#logger.subLogger(`readers/${name}`));
+	#spawnOscifier(devicePath:string, targetUri:URI, readerLogger:Logger) : OSCifierProcess|undefined {
+		let sink : (evt:InputEvent) => void;
+		try {
+			readerLogger.update("status", "starting", true);
+			readerLogger.update("error", "", true);
+			sink = this.#eventSinkSource(targetUri);
+		} catch( e ) {
+			readerLogger.update("status", "offline", true);
+			readerLogger.update("error", errString(e));
+			return undefined;
+		}
+		const oscifier = spawnOscifier(devicePath, sink, readerLogger);
 		this.addChild(oscifier);
 		return oscifier;
 	}
@@ -216,8 +234,9 @@ class OSCifierControl extends ProcessGroup {
 					
 					// Otherwise, make target current:
 					osc.currentConfig = osc.targetConfig;
-					this.#logger.update(`readers/${readerName}/inputpath`, osc.currentConfig.inputPath!);
-					this.#logger.update(`readers/${readerName}/target`, osc.currentConfig.targetUri!);
+					const readerLogger = this.#logger.subLogger(`readers/${readerName}`);
+					readerLogger.update(`inputpath`, osc.currentConfig.inputPath!);
+					readerLogger.update(`target`, osc.currentConfig.targetUri!);
 					
 					if( osc.currentProcess != undefined ) {
 						this.#logger.info(`Waiting for old reader proces (${osc.currentProcess.id} / '${osc.currentProcess.name}') to exit`)
@@ -225,7 +244,7 @@ class OSCifierControl extends ProcessGroup {
 					}
 					
 					this.#logger.info(`Spawning oscifier from ${targetConfig.inputPath} to ${targetConfig.targetUri}`);
-					osc.currentProcess = this.#spawnOscifier(readerName, targetConfig.inputPath!, targetConfig.targetUri!);
+					osc.currentProcess = this.#spawnOscifier(targetConfig.inputPath!, targetConfig.targetUri!, readerLogger);
 				}, 200);
 			};
 		}

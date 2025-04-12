@@ -130,7 +130,7 @@ function spawnOscifier(devicePath : FilePath, eventSink : (evt:InputEvent) => vo
 			
 			let statpubtimer : number|undefined;
 			try {
-				logger.update('status','online');
+				logger.update('status','online',true);
 				let byteCount = 0;
 				let eventCount = 0;
 				let minValue = Infinity;
@@ -189,16 +189,17 @@ class OSCifierControl extends ProcessGroup {
 	
 	#spawnOscifier(devicePath:string, targetUri:URI, readerLogger:Logger) : OSCifierProcess|undefined {
 		let sink : (evt:InputEvent) => void;
+		let oscifier : ProcessLike;
 		try {
 			readerLogger.update("status", "starting", true);
 			readerLogger.update("error", "", true);
 			sink = this.#eventSinkSource(targetUri);
+			oscifier = spawnOscifier(devicePath, sink, readerLogger);
 		} catch( e ) {
 			readerLogger.update("status", "offline", true);
-			readerLogger.update("error", errString(e));
+			readerLogger.update("error", errString(e), true);
 			return undefined;
 		}
-		const oscifier = spawnOscifier(devicePath, sink, readerLogger);
 		this.addChild(oscifier);
 		return oscifier;
 	}

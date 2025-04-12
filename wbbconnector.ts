@@ -31,9 +31,17 @@ async function waitForDeviceOrAbort(
 	return undefined;
 }
 
+function waitOrAbort<X>(xProm:Promise<X>, sig:AbortSignal) {
+	return Promise.race([
+		xProm,
+		new Promise<never>((_, reject) => sig.addEventListener("abort", () => reject(new Error("Operation aborted"))))
+	]);
+}
+
 async function attemptToConnect(
 	adapter     : Adapter,
 	macAddress  : string,
+	statusUpdated : (stat:string|null) => void,
 	opts: {
 		forceDance?  : boolean,
 		abortSignal? : AbortSignal,
@@ -47,7 +55,7 @@ async function attemptToConnect(
 	
 	// let device = await adapter.waitForDevice(macAddress);
 	
-	logger.update("status", "");
+	statusUpdated(null);
 	
 	logger.info(`Getting device for ${macAddress}...`);
 	[device] = await adapter.getDevices(macAddress);
@@ -57,13 +65,19 @@ async function attemptToConnect(
 	}
 	
 	logger.info(`Checking if ${macAddress} is already connected...`);
-	const alreadyConnected = await device.isConnected();
+	
+	let alreadyConnected = false;
+	try {
+		alreadyConnected = await waitOrAbort(device.isConnected(), AbortSignal.any([abortSignal, AbortSignal.timeout(2000)]));
+	} catch( _e ) {
+		logger.info(`isConnected timed out!`);
+	}
 	if( alreadyConnected ) {
 		if( opts.forceDance ) {
 			logger.info(`${macAddress} already connected, but we MUST DANCE ANYWAY`);
 		} else {
 			logger.info(`${macAddress} already connected!  Skipping the remove/trust/pair dance`);
-			logger.update("status", "connected");
+			statusUpdated("connected");
 			return device;
 		}
 	} else {
@@ -82,7 +96,7 @@ async function attemptToConnect(
 	logger.info(`${macAddress} removed`);
 	
 	logger.info(`Waiting for ${macAddress} again...`);
-	logger.update("status", "offline");
+	statusUpdated("offline");
 	
 	const reconnectTimeout = 5000;
 	device = await waitForDeviceOrAbort(adapter, macAddress, AbortSignal.any([abortSignal, AbortSignal.timeout(reconnectTimeout)]));
@@ -94,17 +108,17 @@ async function attemptToConnect(
 	await device.setProperty('Trusted', dbusTypes.booleanType, true);
 	checkAbort();
 	logger.info(`Set ${macAddress} as trusted!`);
-	logger.update("status", "trusted");
+	statusUpdated("trusted");
 	
 	await device.callMethod('Pair');
 	checkAbort();
 	logger.info(`${macAddress} paired!`);
-	logger.update("status", "paired");
+	statusUpdated("paired");
 	
 	await device.callMethod("Connect");
 	checkAbort();
 	logger.info(`${macAddress} Connected!`);
-	logger.update("status", "connected");
+	statusUpdated("connected");
 	
 	return device;
 }
@@ -176,20 +190,18 @@ class WBBConnectorV2 extends ProcessGroup {
 				if( sig.aborted ) return EXITCODE_ABORTED;
 				
 				const devState = this.#deviceStates[devKey];
-				const devTopicPrefix = `devices/${devState.name}`;
 				this.log(`btConnectionLoop: Checking on ${devState.name} (${devState.status})`);
 				if( devState.status == undefined || devState.status == "disconnected" ) {
 					// TODO: timeout after, like, 20 seconds idk
 					try {
+						const devLogger : Logger = this.#logger.subLogger(`devices/${devState.name}`);
+						const attLogger : Logger = this.#logger.subLogger(`attempt-to-connect/${devState.name}`);
 						devState.bluezDevice = await attemptToConnect(
 							adapter, devState.macAddress,
+							(status) => devLogger.update("status", status ?? "", true),
 							{
 								...this.#attemptToConnectOpts,
-								logger: {
-									info: (message:string) => this.#logger.info(`attemptToConnect("${devState.macAddress}"): ${message}`),
-									update: (topic:string, payload:string, persist:boolean=false) => this.#logger.update(`${devTopicPrefix}/${topic}`, payload, persist),
-									subLogger: (_path) => { throw new Error("No subloggers here lmao") },
-								}
+								logger: attLogger
 							}
 						);
 						devState.status = "connected";
@@ -329,12 +341,10 @@ class PromisedProcessLike implements ProcessLike {
 	}
 }
 
-import { Mqtt, MqttClient } from 'jsr:@ymjacky/mqtt5@0.0.19';
 import { parseTargetSpec, TargetSpec } from './src/main/ts/sink/sinkspec.ts';
 import Logger from './src/main/ts/lerg/Logger.ts';
-import { ConsoleLogger, MultiLogger, NULL_LOGGER } from './src/main/ts/lerg/loggers.ts';
-import { MQTTLogger } from './src/main/ts/mqtt/MQTTLogger.ts';
-import { dirPathToPrefix } from './src/main/ts/pathutil.ts';
+import { MultiLogger, NULL_LOGGER } from './src/main/ts/lerg/loggers.ts';
+import { makeLogger } from './src/main/ts/lerg/makelogger.ts';
 export const textEncoder = new TextEncoder();
 
 export function makeMultiLogger(specs:TargetSpec[]) {

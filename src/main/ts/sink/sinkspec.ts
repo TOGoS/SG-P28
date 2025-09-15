@@ -53,6 +53,17 @@ function stripUndefs<T>(obj: T): Partial<T> {
 	return newObj;
 }
 
+export function formatTargetSpec(targetSpec:TargetSpec) {
+	if( targetSpec.type == "MQTT" ) {
+		// TODO: Any escaping needed?
+		// TODO: Debug params?
+		const portStr = targetSpec.targetPort ? `:${targetSpec.targetPort}` : '';
+		return `mqtt://${targetSpec.targetHostname}${portStr}${targetSpec.topic}`;
+	} else {
+		throw new Error(`formatTargetSpec doesn't yet handle ${targetSpec.type} targets; sorry!`);
+	}
+}
+
 export function parseTargetSpec(targetSpec:string) : TargetSpec {
 	let m : RegExpExecArray|null;
 	if( "console" == targetSpec || "debug" == targetSpec ) {

@@ -22,20 +22,21 @@ type ConnectionStatus<T> = {
 
 class Dashboard {
 	#canvas : TOGTUICanvas;
-	constructor(out:WritableStreamDefaultWriter) {
-		this.#canvas = new TOGTUICanvas(out, this.render.bind(this));
-	}
-	get canvas() { return this.#canvas; }
-	
 	#needClear : boolean = true;
 	#connectionStatus : ConnectionStatus<TargetSpec> = {"status":"not-connected"};
 	#attrMap : Map<string,string> = new Map();
 	#logMessages : string[] = [];
 	#screenSize : {columns:number, rows:number} = {rows: 40, columns: 80};
 	
+	constructor(out:WritableStreamDefaultWriter) {
+		this.#canvas = new TOGTUICanvas(out, this.render.bind(this));
+	}
+	get canvas() { return this.#canvas; }
+	
 	set connectionStatus(status:ConnectionStatus<TargetSpec>) {
 		// throw new Error(`Setting connection status to ${JSON.stringify(status)}!`);
 		this.#connectionStatus = status;
+		// this.log(`Connection status updated to ${JSON.stringify(status)}, or ${this._connectionStatusAsString}`);
 		this.#canvas.requestRedraw();
 	}
 	
@@ -68,12 +69,13 @@ class Dashboard {
 		}
 		out.write(textEncoder.encode(ansicodes.moveCursor(0,0)));
 		out.write(textEncoder.encode(this.#renderCount + " | " + this._connectionStatusAsString))
-		out.write(textEncoder.encode(ansicodes.moveCursor(0,1)));
+		out.write(textEncoder.encode(ansicodes.moveCursor(1,0)));
 		for( const [k,v] of this.#attrMap.entries() ) {
 			out.write(textEncoder.encode(`${k} : ${v}\n`));
 		}
-		
-		// TODO: Put log messages somewhere
+		for( const msg of this.#logMessages ) {
+			out.write(textEncoder.encode(msg+"\n"));
+		}
 		return Promise.resolve();
 	}
 	log(text:string) {
@@ -117,19 +119,27 @@ const dashboardMain = (sourceSpec:TargetSpec) => async (ctx:ProcessLikeSpawnCont
 	
 	outerAbortSignal.addEventListener("abort", () => abortController.abort());
 	
+	// dashboard.log("Connecting to "+formatTargetSpec(sourceSpec));
+	dashboard.connectionStatus = {status: "connecting", target: sourceSpec };
+	
 	if( sourceSpec.type == "MQTT" ) {
-		dashboard.connectionStatus = {status: "connecting", target: sourceSpec };
 		const mqttClient = new MqttClient({url: new URL(`mqtt://${sourceSpec.targetHostname}:${sourceSpec.targetPort}`)});
 		abortSignal.addEventListener("abort", () => {
+			dashboard.log("Disconnecting due to abort signal");
 			mqttClient.disconnect();
 		});
 		await mqttClient.connect();
 		dashboard.connectionStatus = {status: "connected", target: sourceSpec };
+		dashboard.log("Connected to "+formatTargetSpec(sourceSpec)+"!");
 		mqttClient.subscribe("#");
 		mqttClient.on('publish', evt => {
 			dashboard.update(evt.detail.topic, evt.detail.payload);
 		});
+		mqttClient.on("disconnect", () => {
+			dashboard.log("Got disconnect packet, or something from "+formatTargetSpec(sourceSpec)+"!");
+		});
 		mqttClient.on("closed", () => {
+			dashboard.log("Disconnected from "+formatTargetSpec(sourceSpec)+"!");
 			dashboard.connectionStatus = {status: "not-connected"};
 		});
 	} else {
@@ -148,6 +158,7 @@ const dashboardMain = (sourceSpec:TargetSpec) => async (ctx:ProcessLikeSpawnCont
 				abortController.abort();
 				break;
 			} else if( evt.key == "r" ) { // 'r' for redraw
+				dashboard.log("'r' hit!");
 				dashboard.screenSize = Deno.consoleSize();
 			}
 		}

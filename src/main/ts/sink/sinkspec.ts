@@ -58,7 +58,7 @@ export function formatTargetSpec(targetSpec:TargetSpec) {
 		// TODO: Any escaping needed?
 		// TODO: Debug params?
 		const portStr = targetSpec.targetPort ? `:${targetSpec.targetPort}` : '';
-		return `mqtt://${targetSpec.targetHostname}${portStr}${targetSpec.topic}`;
+		return `mqtt://${targetSpec.targetHostname}${portStr}/${targetSpec.topic}`;
 	} else {
 		throw new Error(`formatTargetSpec doesn't yet handle ${targetSpec.type} targets; sorry!`);
 	}
@@ -106,6 +106,7 @@ export function parseTargetSpec(targetSpec:string) : TargetSpec {
 			type: "MQTT",
 			targetHostname,
 			targetPort,
+			// As per MQTT convention, topic does not include a leading '/'
 			topic,
 			debugging,
 		}) as TargetSpec;

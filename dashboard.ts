@@ -1,7 +1,10 @@
+import AABB2D from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/AABB2D.ts';
 import * as ansi from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/ansi.ts';
-import { SizedRasterable } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/components2.ts';
-import TextRaster2 from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/TextRaster2.ts';
-import { createUniformRaster, drawTextToRaster } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/textraster2utils.ts';
+import { BDC_PROP_VALUES } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/boxcharprops.ts';
+import { makeChildLineBorderGenerator } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/boxdrawcomponents2.ts';
+import { AbstractComponentWrapper, AbstractRasterable, BoundedRasterable, FixedRasterable, makeFlex, makeSolidGenerator, PackedRasterable, RegionRasterable, SizedRasterable, SizeFillingRasterableGenerator } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/components2.ts';
+import TextRaster2, { Style } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/TextRaster2.ts';
+import { drawTextToRaster, textToRaster } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/textraster2utils.ts';
 import Vec2D from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/Vec2D.ts';
 import { vec2dsAreEqual } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/vecutils.ts';
 import { DenoStdinLike, PossiblyTUIAppContext, PossiblyTUIAppSpawner, runTuiApp, TUIAppRunnerContext, Waitable } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/tuiappframework3.ts';
@@ -23,6 +26,106 @@ type ConnectionStatus<T> = {
 	target: T
 }
 
+const blueBackground  = makeSolidGenerator(" ", ansi.BLUE_BACKGROUND);
+const blackBackground = makeSolidGenerator(" ", ansi.BLACK_BACKGROUND);
+
+const toBeLined = makeChildLineBorderGenerator(BDC_PROP_VALUES.LIGHT, ansi.WHITE_TEXT);
+
+const flexySpace = makeSolidGenerator(" ", "");
+
+function mkTextRasterable(spans:{text:string, style:Style}[], background=blackBackground) : AbstractRasterable {
+	return makeFlex("right", background, [
+		...spans.map(span => {
+			const rast = textToRaster(span.text, span.style);
+			return {
+				component: new FixedRasterable(rast),
+				flexGrowAlong: 0,
+				flexGrowAcross: 0,
+				flexShrinkAlong: 0,
+				flexShrinkAcross: 0,
+			}
+		}),
+		{
+			// This bit is necessary because there's not yet any way
+			// to tell a component to align itself right or left
+			// (default is to center everything)
+			// the padding ensures that it fills the entire space,
+			// so alignment is irrelevant.
+			component: flexySpace,
+			flexGrowAlong: 1,
+			flexGrowAcross: 0,
+			flexShrinkAlong: 1,
+			flexShrinkAcross: 0,
+		}
+	], {
+		alongBeforeSpace: 1,
+		alongAfterSpace: 1,
+	}); // Maybe add a padding one at the end
+}
+
+function prettyConnectionStatus(status:ConnectionStatus<TargetSpec>) {
+	// TODO: left or right-pad 'connected' / 'connecting'
+	return status.status == "connected" ? [
+		{text:status.status, style:ansi.BRIGHT_GREEN_TEXT},
+		{text:" to ",style:ansi.DEFAULT_STYLE},
+		{text:formatTargetSpec(status.target),style:ansi.BRIGHT_WHITE_TEXT},
+	] :
+	status.status == "connecting" ? [
+		{text:status.status, style:ansi.BRIGHT_YELLOW_TEXT},
+		{text:" to ",style:ansi.DEFAULT_STYLE},
+		{text:formatTargetSpec(status.target),style:ansi.BRIGHT_WHITE_TEXT},
+	] :
+	[
+		{text:status.status, style:ansi.BRIGHT_RED_TEXT},
+	];
+}
+
+const ZERO_BOUNDS : AABB2D<number> = {x0:0, y0:0, x1:0, y1:0};
+
+class AbstractLogRasterable implements AbstractRasterable, PackedRasterable, BoundedRasterable, SizeFillingRasterableGenerator {
+	readonly #background : RegionRasterable;
+	readonly #logMessages : string[];
+	readonly #bounds : AABB2D<number>;
+	readonly #textStyle = "";
+	constructor(background:RegionRasterable, logMessages:string[], bounds:AABB2D<number>=ZERO_BOUNDS) {
+		this.#background = background;
+		this.#logMessages = logMessages;
+		this.#bounds = bounds;
+	}
+	get bounds() { return this.#bounds; }
+	pack(_maxSize : Vec2D<number>) : PackedRasterable {
+		// Always say we can take up like no space;
+		// flex rasterables will try to give us another column
+		// if our packed size suggests we could use it.
+		return this;
+		/*
+		let maxWidth = 0;
+		let height = 0;
+		for( const logMessage of this.#logMessages ) {
+			maxWidth = Math.max(logMessage.length, maxWidth);
+			height++;
+		}
+		return new AbstractLogRasterable(this.#background, this.#logMessages, {
+			x0: 0, y0: -height,
+			x1: maxWidth, y1: 0,
+		});
+		*/
+	}
+	fillSize(size: Vec2D<number>): BoundedRasterable {
+		return new AbstractLogRasterable(this.#background, this.#logMessages, {
+			x0: 0, y0: -size.y,
+			x1: size.x, y1: 0
+		});
+	}
+	rasterForRegion(region: AABB2D<number>): TextRaster2 {
+		let rast = this.#background.rasterForRegion(region);
+		for( let y=rast.size.y-1, i=this.#logMessages.length-1; y >= 0 && i >= 0; --y, --i ) {
+			rast = drawTextToRaster(rast, {x:0, y}, this.#logMessages[i], this.#textStyle);
+		}
+		return rast;
+	}
+}
+
 class Dashboard implements SizedRasterable {
 	#ctx : PossiblyTUIAppContext
 	#connectionStatus : ConnectionStatus<TargetSpec> = {"status":"not-connected"};
@@ -33,18 +136,74 @@ class Dashboard implements SizedRasterable {
 		this.#ctx = ctx;
 	}
 	
-	rasterForSize(size : Vec2D<number>) : TextRaster2 {
+	#viewState : SizedRasterable|undefined;
+	
+	
+	generateViewState() : SizedRasterable {
+		const statusBox = mkTextRasterable(prettyConnectionStatus(this.#connectionStatus)); // TODO
+		// All this just to pad the sides a little
+		const logBox = makeFlex("right", blackBackground, [
+			{
+				component: new AbstractLogRasterable(blackBackground, this.#logMessages),
+				flexGrowAcross: 1,
+				flexShrinkAcross: 1,
+				flexGrowAlong: 1,
+				flexShrinkAlong: 1,
+			}
+		], {
+			alongBeforeSpace: 1,
+			alongAfterSpace: 1,
+		});
+		
+		const flex = makeFlex("down", toBeLined, [
+			{
+				component: statusBox,
+				flexGrowAcross: 1,
+				flexShrinkAcross: 0,
+				flexGrowAlong: 0,
+				flexShrinkAlong: 0,
+			},
+			{
+				component: logBox,
+				flexGrowAcross: 1,
+				flexShrinkAcross: 1,
+				flexGrowAlong: 1,
+				flexShrinkAlong: 1,
+			}
+		], {
+			alongBeforeSpace: 1,
+			alongBetweenSpace: 1,
+			alongAfterSpace: 1,
+			acrossBeforeSpace: 1,
+			acrossBetweenSpace: 1,
+			acrossAfterSpace: 1,
+		});
+		
+		/*
 		let rast = createUniformRaster(size, "/", "");
 		rast = drawTextToRaster(rast, {x:1,y:1}, " "+this._connectionStatusAsString+" ", ansi.BRIGHT_WHITE_TEXT );
 		
 		for( let y=size.y-2, i=this.#logMessages.length - 1; y >= 3 && i >= 0; --i, --y ) {
 			rast = drawTextToRaster(rast, {x:1, y}, " "+this.#logMessages[i]+" ", "");
 		}
+		*/
 		
-		return rast;
+		return new AbstractComponentWrapper(flex);
+	}
+	
+	get _viewState() : SizedRasterable {
+		if( this.#viewState == undefined ) {
+			this.#viewState = this.generateViewState();
+		}
+		return this.#viewState;
+	}
+	
+	rasterForSize(size : Vec2D<number>) : TextRaster2 {
+		return this._viewState.rasterForSize(size);
 	}
 	
 	_requestRedraw() {
+		this.#viewState = undefined;
 		this.#ctx.setScene(this);
 	}
 	
@@ -125,6 +284,9 @@ class DashboardAppInstance extends AbstractAppInstance<KeyEvent,number> {
 		if( input.key == "q" ) {
 			this._requestCleanExit(0);
 		}
+		if(input.key == "d" ) {
+			this._disconnect("Disconnecting because requested by user");
+		}
 		if(input.key == "c" && input.ctrlKey) {
 			this._abort(new Error("Aborted by user"));
 		}
@@ -138,12 +300,19 @@ class DashboardAppInstance extends AbstractAppInstance<KeyEvent,number> {
 		return super._cleanup();
 	}
 	
+	async _disconnect(explanation:string) : Promise<void> {
+		if( this.#mqttClient ) {
+			this.#dashboard.log(explanation);
+			await this.#mqttClient.disconnect();
+			this.#mqttClient = undefined;
+		}
+	}
+	
 	async _connect() : Promise<void> {
 		const sourceSpec = this.#sourceSpec;
 		
 		if( this.#mqttClient ) {
-			this.#dashboard.log("Disconnecting for new connection");
-			this.#mqttClient.disconnect();
+			await this._disconnect("Disconnecting in order to reconnect")
 		}
 		
 		if( sourceSpec.type == "MQTT" ) {

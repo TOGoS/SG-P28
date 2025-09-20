@@ -25,11 +25,9 @@ type ConnectionStatus<T> = {
 
 class Dashboard implements SizedRasterable {
 	#ctx : PossiblyTUIAppContext
-	#needClear : boolean = true;
 	#connectionStatus : ConnectionStatus<TargetSpec> = {"status":"not-connected"};
 	#attrMap : Map<string,string> = new Map();
 	#logMessages : string[] = [];
-	#screenSize : {columns:number, rows:number} = {rows: 40, columns: 80};
 	
 	constructor(ctx:PossiblyTUIAppContext) {
 		this.#ctx = ctx;
@@ -73,10 +71,6 @@ class Dashboard implements SizedRasterable {
 	
 	log(text:string) {
 		this.#logMessages.push(text);
-		this._requestRedraw();
-	}
-	set screenSize(size:{rows:number, columns:number}) {
-		this.#screenSize = size;
 		this._requestRedraw();
 	}
 }

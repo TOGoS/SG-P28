@@ -80,6 +80,21 @@ function prettyConnectionStatus(status:ConnectionStatus<TargetSpec>) {
 	];
 }
 
+function padSides(component : AbstractRasterable) {
+	return makeFlex("right", blackBackground, [
+		{
+			component: component,
+			flexGrowAcross: 1,
+			flexShrinkAcross: 1,
+			flexGrowAlong: 1,
+			flexShrinkAlong: 1,
+		}
+	], {
+		alongBeforeSpace: 1,
+		alongAfterSpace: 1,
+	});
+}
+
 const ZERO_BOUNDS : AABB2D<number> = {x0:0, y0:0, x1:0, y1:0};
 
 class AbstractLogRasterable implements AbstractRasterable, PackedRasterable, BoundedRasterable, SizeFillingRasterableGenerator {
@@ -142,18 +157,21 @@ class Dashboard implements SizedRasterable {
 	generateViewState() : SizedRasterable {
 		const statusBox = mkTextRasterable(prettyConnectionStatus(this.#connectionStatus)); // TODO
 		// All this just to pad the sides a little
-		const logBox = makeFlex("right", blackBackground, [
-			{
-				component: new AbstractLogRasterable(blackBackground, this.#logMessages),
-				flexGrowAcross: 1,
-				flexShrinkAcross: 1,
-				flexGrowAlong: 1,
-				flexShrinkAlong: 1,
-			}
-		], {
-			alongBeforeSpace: 1,
-			alongAfterSpace: 1,
-		});
+		const logBox = padSides(new AbstractLogRasterable(blackBackground, this.#logMessages));
+		
+		// TODO: LogRasterable should accept spans so it can be pretty
+		// TODO: Pad the keys maybe?
+		const attrTexts : string[] = [];
+		const attrKeys = [...this.#attrMap.keys()].sort();
+		
+		for( const k of attrKeys ) {
+			attrTexts.push(`${k} = ${this.#attrMap.get(k)}`);
+		}
+		
+		const attrBox = padSides(new AbstractLogRasterable(blackBackground, attrTexts, {
+			x0: 0, y0: 0,
+			x1: 0, y1: attrTexts.length,
+		}));
 		
 		const flex = makeFlex("down", toBeLined, [
 			{
@@ -162,6 +180,13 @@ class Dashboard implements SizedRasterable {
 				flexShrinkAcross: 0,
 				flexGrowAlong: 0,
 				flexShrinkAlong: 0,
+			},
+			{
+				component: attrBox,
+				flexGrowAcross: 1,
+				flexShrinkAcross: 0,
+				flexGrowAlong: 1,
+				flexShrinkAlong: 1,
 			},
 			{
 				component: logBox,
@@ -214,7 +239,9 @@ class Dashboard implements SizedRasterable {
 	}
 	
 	update(key:string, value:Uint8Array) {
-		this.#attrMap.set(key, textDecoder.decode(value));
+		const valText = textDecoder.decode(value);
+		this.log(`${key} = ${valText}`);
+		this.#attrMap.set(key, valText);
 		this._requestRedraw();
 	}
 	
@@ -320,7 +347,10 @@ class DashboardAppInstance extends AbstractAppInstance<KeyEvent,number> {
 			await this.#mqttClient.connect();
 			this.#dashboard.connectionStatus = {status: "connected", target: sourceSpec };
 			this.#dashboard.log("Connected to "+formatTargetSpec(sourceSpec)+"!");
-			this.#mqttClient.subscribe("#");
+			const subPrefix = sourceSpec.topic.endsWith('/') || sourceSpec.topic == '' ? sourceSpec.topic : sourceSpec.topic + '/';
+			const subPat = `${subPrefix}#`;
+			this.#dashboard.log(`Subscribing to ${subPat}`);
+			this.#mqttClient.subscribe(subPat);
 			this.#mqttClient.on('publish', evt => {
 				this.#dashboard.update(evt.detail.topic, evt.detail.payload);
 			});

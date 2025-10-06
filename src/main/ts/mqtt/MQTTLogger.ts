@@ -4,18 +4,18 @@ import { ignoreResult, mkPromiseChain } from '../promises.ts';
 
 const textEncoder = new TextEncoder();
 
+type ActionQueue<C> = <R>(action: (client: C) => Promise<R>) => Promise<R>;
+
 export class MQTTLogger implements Logger {
-	#client: MqttClient;
 	#topicPrefix: string;
 	#chatTopic: string;
 	#statusTopic: string;
 	#mqttThen: <R>(action: (client: MqttClient) => Promise<R>) => Promise<R>;
-	constructor(client: MqttClient, topicPrefix: string) {
-		this.#client = client;
+	protected constructor(mqttThen : ActionQueue<MqttClient>, topicPrefix: string) {
 		this.#topicPrefix = topicPrefix;
 		this.#chatTopic = topicPrefix + 'chat';
 		this.#statusTopic = topicPrefix + 'status';
-		this.#mqttThen = mkPromiseChain(client);
+		this.#mqttThen = mqttThen;
 	}
 	async connect() : Promise<void> {
 		await this.#mqttThen(client => client.connect({
@@ -35,6 +35,15 @@ export class MQTTLogger implements Logger {
 	}
 	
 	subLogger(path: string): Logger {
-	  return new MQTTLogger(this.#client, this.#topicPrefix + path + '/');
+	  return new MQTTLogger(this.#mqttThen, this.#topicPrefix + path + '/');
+	}
+	
+	static create(client:MqttClient, topic:string) : MQTTLogger {
+		return new MQTTLogger(mkPromiseChain(client), topic);
+	}
+	static createAndConnect(client:MqttClient, topic:string) : MQTTLogger {
+		const logger = this.create(client, topic);
+		logger.connect();
+		return logger;
 	}
 }

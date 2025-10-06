@@ -21,9 +21,7 @@ export function makeLogger(spec:TargetSpec) : Logger {
 				protocolVersion: Mqtt.ProtocolVersion.MQTT_V3_1_1,
 				keepAlive: 30,	
 			});
-			const mqttLogger = new MQTTLogger(client, dirPathToPrefix(spec.topic, ''));
-			mqttLogger.connect();
-			return mqttLogger;
+			return MQTTLogger.createAndConnect(client, dirPathToPrefix(spec.topic, ''));
 		}
 		case "Console": {
 			return new ConsoleLogger(console);

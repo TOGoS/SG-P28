@@ -4,7 +4,7 @@
 
 exec deno run --unstable-net --check=all --allow-all wbbconnector.ts v2 \
 	--logger=console \
-	--logger=mqtt://localhost/wbbconnector1 \
+	--logger=mqtt://localhost/smp/wbbconnector1 \
 	'00:21:BD:D1:5C:A9' \
 	'58:BD:A3:AC:20:AD' \
 	"$@"

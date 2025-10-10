@@ -1,0 +1,16 @@
+#!/bin/bash
+
+# TODO: Replace '-demo' scripts with 'sys-' scripts,
+# which take configuration from an environment variable
+# or a command-line option or something.
+# 
+# System configuration should be a single JSON file,
+# or possibly a TypeScript file that can be loaded
+# to indicate what WBBs in the cluster, whether to
+# run the dashboard here, 'control roots', etc
+
+screen -t 'WBB Connector' ./looper ./wbbconnector-demo
+screen -t 'WBB Multi-Oscify' ./looper ./multioscify-demo
+screen -t 'Dashboard' ./looper ./dashboard-demo
+
+echo Services started in new Screen windows.

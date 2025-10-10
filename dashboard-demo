@@ -1,0 +1,3 @@
+#!/bin/sh
+
+exec deno run --allow-net ./dashboard.ts --system-root=mqtt://localhost/smp

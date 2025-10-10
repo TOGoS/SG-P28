@@ -311,7 +311,7 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 	const readersTopic = `${topicPrefix}readers`;
 	const statusTopic  = `${topicPrefix}status`;
 	const mqttClient = new MqttClient({url: new URL(`mqtt://${config.controllerSpec.targetHostname}:${port}`)});
-	const mqttLogger = new MQTTLogger(mqttClient, topicPrefix);
+	const mqttLogger = MQTTLogger.create(mqttClient, topicPrefix);
 	await mqttLogger.connect();
 	
 	// Identify topics we should ignore becaue we published them!

@@ -10,8 +10,8 @@ import { vec2dsAreEqual } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/
 import { DenoStdinLike, PossiblyTUIAppContext, PossiblyTUIAppSpawner, runTuiApp, TUIAppRunnerContext, Waitable } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/tuiappframework3.ts';
 import WatchableVariable, { makeReadonlyWatchable } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/WatchableVariable.ts';
 import { MqttClient } from "jsr:@ymjacky/mqtt5@0.0.19";
-import KeyEvent from '../Scratch38-S0015/src/lib/ts/terminput/KeyEvent.ts';
-import { AbstractAppInstance } from '../Scratch38-S0015/src/lib/ts/tuiappframework3.ts';
+import KeyEvent from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/terminput/KeyEvent.ts';
+import { AbstractAppInstance } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/tuiappframework3.ts';
 import ProcessLike from './src/main/ts/process/ProcessLike.ts';
 import { functionToProcessLike } from './src/main/ts/process/util.ts';
 import { formatTargetSpec, parseTargetSpec, TargetSpec } from "./src/main/ts/sink/sinkspec.ts";
@@ -343,7 +343,7 @@ class DashboardAppInstance extends AbstractAppInstance<KeyEvent,number> {
 		}
 		
 		if( sourceSpec.type == "MQTT" ) {
-			this.#mqttClient = new MqttClient({url: new URL(`mqtt://${sourceSpec.targetHostname}:${sourceSpec.targetPort}`)});
+			this.#mqttClient = new MqttClient({url: new URL(`mqtt://${sourceSpec.targetHostname}:${sourceSpec.targetPort ?? 1883}`)});
 			await this.#mqttClient.connect();
 			this.#dashboard.connectionStatus = {status: "connected", target: sourceSpec };
 			this.#dashboard.log("Connected to "+formatTargetSpec(sourceSpec)+"!");
@@ -445,24 +445,26 @@ function makeOutputSpawner(outText:string, errText:string, exitCode:number) : Pr
 }
 
 const HELP_TEXT =
-	"Usage: dashboard --control-root=mqtt://<host>:<port>/[<topic>]\n";
+	"Usage: dashboard --system-root=mqtt://<host>:<port>/[<topic>]\n";
 
 function parseMain(args:string[]) : ProcessLikeSpawner {
 	let mqttServer : TargetSpec|undefined;
 	for( const arg of args ) {
 		let m : RegExpExecArray|null;
-		if( (m = /^--control-root=(.*)/.exec(arg)) != null ) {
+		if( (m = /^--system-root=(.*)/.exec(arg)) != null ) {
 			if( mqttServer == undefined ) {
 				mqttServer = parseTargetSpec(m[1]);
 			} else {
-				return makeOutputSpawner("", "Too many --control-root specified!", 1);
+				return makeOutputSpawner("", "Too many --system-root specified!\n", 1);
 			}
 		} else if( arg == '--help' ) {
 			return makeOutputSpawner(HELP_TEXT, "", 0);
+		} else {
+			return makeOutputSpawner("",`Unrecognized argument: ${arg}\n`,1);
 		}
 	}
 	if( mqttServer == undefined ) {
-		return makeOutputSpawner("", "No --control-root=... indicated\n", 1);
+		return makeOutputSpawner("", "No --system-root=... indicated\n", 1);
 	}
 	return makeTuiAppSpawner(dashboardAppSpawner(mqttServer));
 }

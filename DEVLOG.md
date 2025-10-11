@@ -41,3 +41,15 @@ then creating a sublogger, than logging with that would disregard whether the co
 had completed.
 
 Fixed by constructing `MQTTLogger`s with the action queue rather than the MQTT client itself.
+
+## 2025-10-10
+
+Created `start-system-in-screen`.
+Which at least shows how to start 'the whole system' as it currently exists.
+
+Some dinking around in dashboard.ts.
+
+Maybe the thing to do is have a tree of topic -> message log.
+Then walk the tree to figure out what's going on re: devices.
+
+

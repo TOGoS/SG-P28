@@ -19,6 +19,15 @@ import { formatTargetSpec, parseTargetSpec, TargetSpec } from "./src/main/ts/sin
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
+function attemptTextDecode(possibleText:Uint8Array) : string|undefined {
+	try {
+		return textDecoder.decode(possibleText);
+	} catch {
+		return undefined;
+	}
+}
+
+
 type ConnectionStatus<T> = {
 	status: "not-connected"
 } | {
@@ -141,22 +150,69 @@ class AbstractLogRasterable implements AbstractRasterable, PackedRasterable, Bou
 	}
 }
 
+interface MessageInfo<V> {
+	received: number;
+	key  : string;
+	value: V
+}
+
+interface MQTTMessage extends MessageInfo<Uint8Array> {
+	valueText: string|undefined
+}
+
+interface DeviceInfo {
+	name     : string;
+	status   : string;
+	className: string;
+	chat     : string[];
+	attributes: Map<string,string>;
+}
+
+/**
+ * If something has a 'status', then presumably it's a device?
+ * The topmost 'thing with status' is the device.
+ * a/status online # Ah, so A is a device
+ * a/foo/status # Foo is some sub-object, not a top-level device.
+ * 
+ * But, uhh, I'm not sure what I want this to do!
+ * 
+ * @param attrs 
+ * @param chats 
+ */
+function deriveDeviceInfo(attrs:Map<string,MQTTMessage>, chats:Map<string,MQTTMessage[]>) {
+	const deviceNames = new Set<string>();
+	const deviceInfo = new Map<string,DeviceInfo>();
+	for( const [k,v] of attrs ) {
+		const keyParts = k.split('/');
+		if( keyParts.length == 0 ) continue; // Weird but whatever.
+		const lastPart = keyParts[keyParts.length-1];
+		if( lastPart == "status" && keyParts.length >= 2 ) {
+			const deviceName = keyParts[keyParts.length-2];
+			
+		}
+	}
+}
+
+const S_UNINITIALIZED    = Symbol.for("uninitialized");
+const S_REDRAW_REQUESTED = Symbol.for("redraw-requested");
+
 class Dashboard implements SizedRasterable {
 	#ctx : PossiblyTUIAppContext
 	#connectionStatus : ConnectionStatus<TargetSpec> = {"status":"not-connected"};
-	#attrMap : Map<string,string> = new Map();
+	#deviceInfo : Map<string,DeviceInfo> = new Map();
+	// Map of all current MQTT values
+	#attrMap : Map<string,MQTTMessage> = new Map();
+	#chats : Map<string,MQTTMessage[]> = new Map();
 	#logMessages : string[] = [];
 	
 	constructor(ctx:PossiblyTUIAppContext) {
 		this.#ctx = ctx;
 	}
 	
-	#viewState : SizedRasterable|undefined;
-	
+	#viewState : SizedRasterable|typeof S_UNINITIALIZED|typeof S_REDRAW_REQUESTED = S_UNINITIALIZED;
 	
 	generateViewState() : SizedRasterable {
-		const statusBox = mkTextRasterable(prettyConnectionStatus(this.#connectionStatus)); // TODO
-		// All this just to pad the sides a little
+		const statusBox = mkTextRasterable(prettyConnectionStatus(this.#connectionStatus));
 		const logBox = padSides(new AbstractLogRasterable(blackBackground, this.#logMessages));
 		
 		// TODO: LogRasterable should accept spans so it can be pretty
@@ -217,7 +273,7 @@ class Dashboard implements SizedRasterable {
 	}
 	
 	get _viewState() : SizedRasterable {
-		if( this.#viewState == undefined ) {
+		if( this.#viewState == S_UNINITIALIZED || this.#viewState == S_REDRAW_REQUESTED ) {
 			this.#viewState = this.generateViewState();
 		}
 		return this.#viewState;
@@ -228,7 +284,10 @@ class Dashboard implements SizedRasterable {
 	}
 	
 	_requestRedraw() {
-		this.#viewState = undefined;
+		// It will become something else once the redraw has started.
+		// Until then, we don't need to keep poking #ctx about it.
+		if( this.#viewState == S_REDRAW_REQUESTED ) return;
+		this.#viewState = S_REDRAW_REQUESTED;
 		this.#ctx.setScene(this);
 	}
 	
@@ -238,10 +297,24 @@ class Dashboard implements SizedRasterable {
 		this._requestRedraw();
 	}
 	
-	update(key:string, value:Uint8Array) {
-		const valText = textDecoder.decode(value);
-		this.log(`${key} = ${valText}`);
-		this.#attrMap.set(key, valText);
+	#addChat(deviceId:string, message:MQTTMessage) {
+		let list : MQTTMessage[]|undefined = this.#chats.get(deviceId);
+		if( list == undefined ) this.#chats.set(deviceId, list=[]);
+		list.push(message);
+		this._requestRedraw();
+	}
+	
+	update(message:MQTTMessage) {
+		if( message.key.length == 0 ) return;
+		this.log(`${message.key} = ${message.valueText ?? '(undecodable)'}`);
+		this.#attrMap.set(message.key, message);
+		
+		const pathParts = message.key.split('/');
+		const lastPathPart = pathParts[pathParts.length-1];
+		if( lastPathPart == "chat" && pathParts.length >= 2 ) {
+			this.#addChat(pathParts.slice(0,pathParts.length-1).join('/'), message);
+		}
+		
 		this._requestRedraw();
 	}
 	
@@ -355,7 +428,13 @@ class DashboardAppInstance extends AbstractAppInstance<KeyEvent,number> {
 			this.#dashboard.log(`Subscribing to ${subPat}`);
 			this.#mqttClient.subscribe(subPat);
 			this.#mqttClient.on('publish', evt => {
-				this.#dashboard.update(evt.detail.topic, evt.detail.payload);
+				const messageInfo : MQTTMessage = {
+					received: Date.now(),
+					key: evt.detail.topic,
+					value: evt.detail.payload,
+					valueText: attemptTextDecode(evt.detail.payload),
+				};
+				this.#dashboard.update(messageInfo);
 			});
 			this.#mqttClient.on("disconnect", () => {
 				this.#dashboard.log("Got disconnect packet, or something from "+formatTargetSpec(sourceSpec)+"!");

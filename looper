@@ -1,10 +1,20 @@
 #!/bin/bash
 
-"$@"
-while [ $? -eq 69 ]
+exitcode=69
+
+while [ $exitcode -eq 69 ]
 do
-	echo "$1 requested restart"
-	sleep 1
-	echo "Starting $1..."
+	echo "# looper: Starting $1..."
 	"$@"
+	exitcode=$?
+	echo "# looper: $1 exited with status $exitcode"
+	if [ $exitcode -eq 69 ]
+	then
+		echo "# looper: Will restart in 2 seconds"
+	else
+		echo "# looper: Will exit with code $exitcode"
+	fi
+	sleep 2
 done
+
+exit $exitcode

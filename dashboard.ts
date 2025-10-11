@@ -311,6 +311,9 @@ class DashboardAppInstance extends AbstractAppInstance<KeyEvent,number> {
 		if( input.key == "q" ) {
 			this._requestCleanExit(0);
 		}
+		if( input.key == "r" ) {
+			this._requestCleanExit(69);
+		}
 		if(input.key == "d" ) {
 			this._disconnect("Disconnecting because requested by user");
 		}

@@ -210,7 +210,6 @@ function messageTreeIsFrozen<M>(tree:MessageTree<M>|MutableMessageTree<M>) : tre
 	return Object.isFrozen(tree);
 }
 
-// Freeze the tree recursively
 function freezeMessageTree<M>(tree: MessageTree<M>|MutableMessageTree<M>): MessageTree<M> {
 	if(messageTreeIsFrozen(tree)) return tree;
 	
@@ -220,7 +219,6 @@ function freezeMessageTree<M>(tree: MessageTree<M>|MutableMessageTree<M>): Messa
 	return Object.freeze(tree) as MessageTree<M>;
 }
 
-// Unfreeze the tree recursively (only the path that will be updated)
 function unfreezeMessageTree<M>(tree: MessageTree<M>): MutableMessageTree<M> {
 	if(!Object.isFrozen(tree)) return tree as MutableMessageTree<M>;
 	
@@ -230,28 +228,15 @@ function unfreezeMessageTree<M>(tree: MessageTree<M>): MutableMessageTree<M> {
 // deno-lint-ignore no-explicit-any
 const EMPTY_MESSAGE_TREE : MessageTree<any> = freezeMessageTree({messages:[], children:new Map()});
 
-// Update function: returns a new tree with the message inserted at the correct node
-function updateMessageTree<M>(
-	tree: MessageTree<M>|MutableMessageTree<M>,
-	key: string,
-	message: M,
-	historySize: number
-): MutableMessageTree<M> {
-	const parts = key.split('/').filter(Boolean);
-	return _updateMessageTree(tree, parts, message, historySize);
-}
-
 function _updateMessageTree<M>(
 	tree: MessageTree<M>|MutableMessageTree<M>,
 	parts: string[],
 	message: M,
 	historySize: number
 ): MutableMessageTree<M> {
-	// Unfreeze if necessary
 	if(messageTreeIsFrozen(tree)) tree = unfreezeMessageTree(tree);
 	
 	if (parts.length === 0) {
-		// Leaf node: update messages
 		const newMessages : M[] = [...tree.messages, message].slice(-historySize);
 		return {messages:newMessages, children:tree.children};
 	} else {
@@ -264,6 +249,17 @@ function _updateMessageTree<M>(
 		);
 		return tree;
 	}
+}
+
+/** Return a new tree with the message inserted at the correct node */
+function updateMessageTree<M>(
+	tree: MessageTree<M>|MutableMessageTree<M>,
+	key: string,
+	message: M,
+	historySize: number
+): MutableMessageTree<M> {
+	const parts = key.split('/').filter(Boolean);
+	return _updateMessageTree(tree, parts, message, historySize);
 }
 
 //// End MessageTree stuff

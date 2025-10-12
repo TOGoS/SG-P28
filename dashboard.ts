@@ -193,6 +193,83 @@ function deriveDeviceInfo(attrs:Map<string,MQTTMessage>, chats:Map<string,MQTTMe
 	}
 }
 
+// Sometimes-immutable MessageTree structure
+
+type MessageTreeChild<M, Frozen extends boolean> =
+	Frozen extends true
+		? MessageTree<M, true>
+		: MessageTree<M, true | false>;
+
+type MessageTree<M, Frozen extends boolean = true|false> = {
+	readonly messages: M[];
+	readonly children: Map<string, MessageTreeChild<M,Frozen>>;
+	readonly frozen: Frozen;
+};
+
+function createMessageTree<M, Frozen extends boolean>(
+	messages: M[] = [],
+	children: Map<string, MessageTreeChild<M,Frozen>> = new Map(),
+	frozen : Frozen
+): MessageTree<M,Frozen> {
+	return { messages, children, frozen };
+}
+
+// Freeze the tree recursively
+function freezeMessageTree<M>(tree: MessageTree<M>): MessageTree<M, true>{
+	if (tree.frozen) return tree as MessageTree<M,true>;
+	const frozenChildren = new Map<string, MessageTree<M,true>>();
+	for (const [k, v] of tree.children) {
+		frozenChildren.set(k, freezeMessageTree(v));
+	}
+	return createMessageTree([...tree.messages], frozenChildren, true);
+}
+
+// Unfreeze the tree recursively (only the path that will be updated)
+function unfreezeMqttMessageTree<M>(tree: MessageTree<M>): MessageTree<M,false> {
+	if (!tree.frozen) return tree as MessageTree<M,false>;
+	const unfrozenChildren = new Map<string, MessageTree<M,true|false>>(tree.children);
+	return createMessageTree([...tree.messages], unfrozenChildren, false);
+}
+
+// Update function: returns a new tree with the message inserted at the correct node
+function updateMqttMessageTree<M>(
+	tree: MessageTree<M>,
+	key: string,
+	message: M,
+	historySize: number
+): MessageTree<M> {
+	const parts = key.split('/').filter(Boolean);
+	return _updateMqttMessageTree(tree, parts, message, historySize);
+}
+
+function _updateMqttMessageTree<M>(
+	tree: MessageTree<M,true|false>,
+	parts: string[],
+	message: M,
+	historySize: number
+): MessageTree<M,true|false> {
+	// Unfreeze if necessary
+	if(tree.frozen) tree = unfreezeMqttMessageTree(tree);
+
+	if (parts.length === 0) {
+		// Leaf node: update messages
+		const newMessages : M[] = [...tree.messages, message].slice(-historySize);
+		return createMessageTree(newMessages, tree.children, false);
+	} else {
+		const [head, ...tail] = parts;
+		const child = tree.children.get(head) ?? createMessageTree([], new Map, false);
+		const updatedChild = _updateMqttMessageTree(child, tail, message, historySize);
+
+		// Update children map immutably
+		const newChildren = new Map(tree.children);
+		newChildren.set(head, updatedChild);
+
+		return createMessageTree(tree.messages, newChildren, false);
+	}
+}
+
+//// End MessageTree stuff
+
 const S_UNINITIALIZED    = Symbol.for("uninitialized");
 const S_REDRAW_REQUESTED = Symbol.for("redraw-requested");
 

@@ -204,7 +204,7 @@ type MessageTree<M> = Readonly<{
 	readonly isFrozen?: true;
 	readonly	messages: ReadonlyArray<M>;
 	readonly children: ReadonlyMap<string, MessageTree<M>>;
-}>
+}>;
 
 function messageTreeIsFrozen<M>(tree:MessageTree<M>|MutableMessageTree<M>) : tree is MessageTree<M> {
 	return Object.isFrozen(tree);
@@ -221,31 +221,34 @@ function freezeMessageTree<M>(tree: MessageTree<M>|MutableMessageTree<M>): Messa
 }
 
 // Unfreeze the tree recursively (only the path that will be updated)
-function unfreezeMqttMessageTree<M>(tree: MessageTree<M>): MutableMessageTree<M> {
+function unfreezeMessageTree<M>(tree: MessageTree<M>): MutableMessageTree<M> {
 	if(!Object.isFrozen(tree)) return tree as MutableMessageTree<M>;
 	
 	return {messages:[...tree.messages], children:new Map<string, MessageTree<M>>(tree.children)};
 }
 
+// deno-lint-ignore no-explicit-any
+const EMPTY_MESSAGE_TREE : MessageTree<any> = freezeMessageTree({messages:[], children:new Map()});
+
 // Update function: returns a new tree with the message inserted at the correct node
-function updateMqttMessageTree<M>(
+function updateMessageTree<M>(
 	tree: MessageTree<M>|MutableMessageTree<M>,
 	key: string,
 	message: M,
 	historySize: number
 ): MutableMessageTree<M> {
 	const parts = key.split('/').filter(Boolean);
-	return _updateMqttMessageTree(tree, parts, message, historySize);
+	return _updateMessageTree(tree, parts, message, historySize);
 }
 
-function _updateMqttMessageTree<M>(
+function _updateMessageTree<M>(
 	tree: MessageTree<M>|MutableMessageTree<M>,
 	parts: string[],
 	message: M,
 	historySize: number
 ): MutableMessageTree<M> {
 	// Unfreeze if necessary
-	if(messageTreeIsFrozen(tree)) tree = unfreezeMqttMessageTree(tree);
+	if(messageTreeIsFrozen(tree)) tree = unfreezeMessageTree(tree);
 	
 	if (parts.length === 0) {
 		// Leaf node: update messages
@@ -254,7 +257,7 @@ function _updateMqttMessageTree<M>(
 	} else {
 		const [head, ...tail] = parts;
 		tree.children.set(head,
-			_updateMqttMessageTree(
+			_updateMessageTree(
 				tree.children.get(head) ?? {messages:[], children:new Map},
 				tail, message, historySize
 			)
@@ -273,8 +276,7 @@ class Dashboard implements SizedRasterable {
 	#connectionStatus : ConnectionStatus<TargetSpec> = {"status":"not-connected"};
 	#deviceInfo : Map<string,DeviceInfo> = new Map();
 	// Map of all current MQTT values
-	#attrMap : Map<string,MQTTMessage> = new Map();
-	#chats : Map<string,MQTTMessage[]> = new Map();
+	#messageTree : MessageTree<MQTTMessage>|MutableMessageTree<MQTTMessage> = EMPTY_MESSAGE_TREE;
 	#logMessages : string[] = [];
 	
 	constructor(ctx:PossiblyTUIAppContext) {
@@ -290,11 +292,6 @@ class Dashboard implements SizedRasterable {
 		// TODO: LogRasterable should accept spans so it can be pretty
 		// TODO: Pad the keys maybe?
 		const attrTexts : string[] = [];
-		const attrKeys = [...this.#attrMap.keys()].sort();
-		
-		for( const k of attrKeys ) {
-			attrTexts.push(`${k} = ${this.#attrMap.get(k)}`);
-		}
 		
 		const attrBox = padSides(new AbstractLogRasterable(blackBackground, attrTexts, {
 			x0: 0, y0: 0,
@@ -369,23 +366,12 @@ class Dashboard implements SizedRasterable {
 		this._requestRedraw();
 	}
 	
-	#addChat(deviceId:string, message:MQTTMessage) {
-		let list : MQTTMessage[]|undefined = this.#chats.get(deviceId);
-		if( list == undefined ) this.#chats.set(deviceId, list=[]);
-		list.push(message);
-		this._requestRedraw();
-	}
-	
 	update(message:MQTTMessage) {
 		if( message.key.length == 0 ) return;
-		this.log(`${message.key} = ${message.valueText ?? '(undecodable)'}`);
-		this.#attrMap.set(message.key, message);
 		
-		const pathParts = message.key.split('/');
-		const lastPathPart = pathParts[pathParts.length-1];
-		if( lastPathPart == "chat" && pathParts.length >= 2 ) {
-			this.#addChat(pathParts.slice(0,pathParts.length-1).join('/'), message);
-		}
+		this.log(`${message.key} = ${message.valueText ?? '(undecodable)'}`);
+		
+		this.#messageTree = updateMessageTree(this.#messageTree, message.key, message, message.key.endsWith('chat') ? 20 : 1);
 		
 		this._requestRedraw();
 	}

@@ -195,76 +195,71 @@ function deriveDeviceInfo(attrs:Map<string,MQTTMessage>, chats:Map<string,MQTTMe
 
 // Sometimes-immutable MessageTree structure
 
-type MessageTreeChild<M, Frozen extends boolean> =
-	Frozen extends true
-		? MessageTree<M, true>
-		: MessageTree<M, true | false>;
-
-type MessageTree<M, Frozen extends boolean = true|false> = {
-	readonly messages: M[];
-	readonly children: Map<string, MessageTreeChild<M,Frozen>>;
-	readonly frozen: Frozen;
+type MutableMessageTree<M> = {
+	isFrozen?: false;
+	messages: M[];
+	children: Map<string, MessageTree<M>|MutableMessageTree<M>>;
 };
+type MessageTree<M> = Readonly<{
+	readonly isFrozen?: true;
+	readonly	messages: ReadonlyArray<M>;
+	readonly children: ReadonlyMap<string, MessageTree<M>>;
+}>
 
-function createMessageTree<M, Frozen extends boolean>(
-	messages: M[] = [],
-	children: Map<string, MessageTreeChild<M,Frozen>> = new Map(),
-	frozen : Frozen
-): MessageTree<M,Frozen> {
-	return { messages, children, frozen };
+function messageTreeIsFrozen<M>(tree:MessageTree<M>|MutableMessageTree<M>) : tree is MessageTree<M> {
+	return Object.isFrozen(tree);
 }
 
 // Freeze the tree recursively
-function freezeMessageTree<M>(tree: MessageTree<M>): MessageTree<M, true>{
-	if (tree.frozen) return tree as MessageTree<M,true>;
-	const frozenChildren = new Map<string, MessageTree<M,true>>();
-	for (const [k, v] of tree.children) {
-		frozenChildren.set(k, freezeMessageTree(v));
-	}
-	return createMessageTree([...tree.messages], frozenChildren, true);
+function freezeMessageTree<M>(tree: MessageTree<M>|MutableMessageTree<M>): MessageTree<M> {
+	if(messageTreeIsFrozen(tree)) return tree;
+	
+	Object.freeze(tree.messages);
+	for( const [_k,child] of tree.children ) freezeMessageTree(child);
+	Object.freeze(tree.children);
+	return Object.freeze(tree) as MessageTree<M>;
 }
 
 // Unfreeze the tree recursively (only the path that will be updated)
-function unfreezeMqttMessageTree<M>(tree: MessageTree<M>): MessageTree<M,false> {
-	if (!tree.frozen) return tree as MessageTree<M,false>;
-	const unfrozenChildren = new Map<string, MessageTree<M,true|false>>(tree.children);
-	return createMessageTree([...tree.messages], unfrozenChildren, false);
+function unfreezeMqttMessageTree<M>(tree: MessageTree<M>): MutableMessageTree<M> {
+	if(!Object.isFrozen(tree)) return tree as MutableMessageTree<M>;
+	
+	return {messages:[...tree.messages], children:new Map<string, MessageTree<M>>(tree.children)};
 }
 
 // Update function: returns a new tree with the message inserted at the correct node
 function updateMqttMessageTree<M>(
-	tree: MessageTree<M>,
+	tree: MessageTree<M>|MutableMessageTree<M>,
 	key: string,
 	message: M,
 	historySize: number
-): MessageTree<M> {
+): MutableMessageTree<M> {
 	const parts = key.split('/').filter(Boolean);
 	return _updateMqttMessageTree(tree, parts, message, historySize);
 }
 
 function _updateMqttMessageTree<M>(
-	tree: MessageTree<M,true|false>,
+	tree: MessageTree<M>|MutableMessageTree<M>,
 	parts: string[],
 	message: M,
 	historySize: number
-): MessageTree<M,true|false> {
+): MutableMessageTree<M> {
 	// Unfreeze if necessary
-	if(tree.frozen) tree = unfreezeMqttMessageTree(tree);
-
+	if(messageTreeIsFrozen(tree)) tree = unfreezeMqttMessageTree(tree);
+	
 	if (parts.length === 0) {
 		// Leaf node: update messages
 		const newMessages : M[] = [...tree.messages, message].slice(-historySize);
-		return createMessageTree(newMessages, tree.children, false);
+		return {messages:newMessages, children:tree.children};
 	} else {
 		const [head, ...tail] = parts;
-		const child = tree.children.get(head) ?? createMessageTree([], new Map, false);
-		const updatedChild = _updateMqttMessageTree(child, tail, message, historySize);
-
-		// Update children map immutably
-		const newChildren = new Map(tree.children);
-		newChildren.set(head, updatedChild);
-
-		return createMessageTree(tree.messages, newChildren, false);
+		tree.children.set(head,
+			_updateMqttMessageTree(
+				tree.children.get(head) ?? {messages:[], children:new Map},
+				tail, message, historySize
+			)
+		);
+		return tree;
 	}
 }
 

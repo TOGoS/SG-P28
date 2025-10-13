@@ -217,31 +217,6 @@ interface DeviceInfo {
 	attributes: Map<string,string>;
 }
 
-/**
- * If something has a 'status', then presumably it's a device?
- * The topmost 'thing with status' is the device.
- * a/status online # Ah, so A is a device
- * a/foo/status # Foo is some sub-object, not a top-level device.
- * 
- * But, uhh, I'm not sure what I want this to do!
- * 
- * @param attrs 
- * @param chats 
- */
-function deriveDeviceInfo(attrs:Map<string,MQTTMessage>, chats:Map<string,MQTTMessage[]>) {
-	const deviceNames = new Set<string>();
-	const deviceInfo = new Map<string,DeviceInfo>();
-	for( const [k,v] of attrs ) {
-		const keyParts = k.split('/');
-		if( keyParts.length == 0 ) continue; // Weird but whatever.
-		const lastPart = keyParts[keyParts.length-1];
-		if( lastPart == "status" && keyParts.length >= 2 ) {
-			const deviceName = keyParts[keyParts.length-2];
-			
-		}
-	}
-}
-
 // Sometimes-immutable MessageTree structure
 
 type MutableMessageTree<M> = {

@@ -262,6 +262,13 @@ function updateMessageTree<M>(
 	return _updateMessageTree(tree, parts, message, historySize);
 }
 
+function walkMessageTree<M>(path:string[], tree:MessageTree<M>|MutableMessageTree<M>, callback:(path:string[], node:MessageTree<M>|MutableMessageTree<M>)=>unknown) {
+	callback(path, tree);
+	for( const [k,child] of tree.children ) {
+		walkMessageTree([...path, k], child, callback);
+	}
+}
+
 //// End MessageTree stuff
 
 const S_UNINITIALIZED    = Symbol.for("uninitialized");
@@ -288,6 +295,27 @@ class Dashboard implements SizedRasterable {
 		// TODO: LogRasterable should accept spans so it can be pretty
 		// TODO: Pad the keys maybe?
 		const attrTexts : string[] = [];
+		
+		const maxShownMessageCount = 3;
+		
+		walkMessageTree([], this.#messageTree, (path,node) => {
+			if( path.length == 0 ) return; // Hopefully no messages here lamo
+			
+			const prefix = "  ".repeat(path.length-1)+path[path.length-1];
+			if( node.messages.length == 0 ) {
+				attrTexts.push(prefix);
+			} else if( node.messages.length == 1 ) {
+				attrTexts.push(prefix+": "+node.messages[0].valueText);
+			} else {
+				attrTexts.push(prefix+":");
+				
+				const messagePrefix = "  ".repeat(path.length) + "- ";
+				for( let i=Math.max(0, node.messages.length-maxShownMessageCount); i<node.messages.length; ++i ) {
+					const message = node.messages[i];
+					attrTexts.push(messagePrefix + message.valueText);
+				}
+			}
+		});
 		
 		const attrBox = padSides(new AbstractLogRasterable(blackBackground, attrTexts, {
 			x0: 0, y0: 0,

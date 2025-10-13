@@ -53,3 +53,10 @@ Maybe the thing to do is have a tree of topic -> message log.
 Then walk the tree to figure out what's going on re: devices.
 
 
+## 2025-10-12
+
+- [ ] Fix logging somewhat - MQTTLogger#subLogger should either
+  do something different, or not be used for logging from functions
+- [ ] Improve online/offline display in dashboard.ts
+- [ ] Indicate time since value changed somehow
+- [ ] Have a clock so I can tell if dashboard itself is updating!

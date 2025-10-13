@@ -68,21 +68,46 @@ Then walk the tree to figure out what's going on re: devices.
 
 ## 2025-10-13
 
+### TODOs from README, relevance unclear
+
+Here for posterity.
+
+- [ ] maybe readers should allow multiple targets?
+  - shouldn't need to restart reader when target changes
+  - 2025-10-13: I think multioscify now does this?
+- [ ] An orchestrator that automatically controls `multioscify` based on path guesses from `wbbconnector`
+  - Probably will want to use shared environment variables defined in a `.env.sh` to configure
+    all these things
+  - 2025-10-13: No formal configuration system, and no 'orchestrator', yet,
+    but you can manually send commands to multioscify with `mosquitto_pub` or whatever.
+
 ### Dashboard sometimes stops updating
 
 Sometimes dashboard would stop updating.
 
-I suspect a big in `TUIRenderStateManager#requestRedraw`.
+I suspect a bug in `TUIRenderStateManager#requestRedraw`.
 
 Could debug by switching dashboard.ts to use local version of S38-S15.
 
-### TODOs from README, relevance unclear
+In the meantime, I have disabled dashboard's internal viewstate update debouncing,
+so that if TUIRenderStateManager misses one, we'll poke it again shortly.
 
-- [ ] maybe readers should allow multiple targets?
-  - shouldn't need to restart reader when target changes
-- [ ] An orchestrator that automatically controls `multioscify` based on path guesses from `wbbconnector`
-  - Probably will want to use shared environment variables defined in a `.env.sh` to configure
-    all these things
+### Various progress!
+
+![Dashboard screenshot, with colored status text, retain, age metadata](http://picture-files.nuke24.net/uri-res/raw/urn:bitprint:EZT2W6RMQNE5FZWRNLRYFCFYCQ3XLB7D.QZSYSGGYEVIYJFDHJ7TE7MXGMER3MS4DA5RLRGQ/0251013T1810-DashboardWithWBBsConnected.png)
+
+Notes:
+- There's a clock in the top-right; if it stops updating, it's because
+  dashboard itself stopped working properly.
+- Values representing connection status are color-coded
+
+Yellow square brackets indicate metadata about values:
+- "R" indicates that the message is retained
+- The number afterwards indicates the age of the message
+
+The TUI framework is still horribly inefficient,
+but even when redrawing the dashboard a couple times per second,
+it is only using 2% CPU, so maybe not a bottleneck just yet.
 
 ### TODO
 

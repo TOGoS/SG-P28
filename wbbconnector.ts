@@ -13,6 +13,60 @@ class DeviceNotAvailable extends Error { }
 type Milliseconds = number;
 type FilePath = string;
 
+interface SimpleLogger {
+	info(whatever:string) : void;
+}
+
+/**
+ * This provides an alternative to subLogger, subLager.
+ * The reason this exists is that MQTTLogger#subLogger
+ * creates alternate chat channels, which is probably not
+ * what you want when you are just debugging functions.
+ * 
+ * But there is a reason subLogger exists.
+ * It is so that MQTTLogger#subLogger can do 'something useful'
+ * and the console logger can also do its own something useful.
+ * It may be that the mistake was having MQTTLogger#subLogger
+ * just does the wrong thing, and should more closely mirror
+ * what the console logger's #subLogger does,
+ * which isn't to make new topics, but just add a prefix
+ * to the text that gets printed as comments.
+ * 
+ * So maybe delete this and go back to using subLogger,
+ * but fix MQTTLogger's implementation to not make
+ * new topics.  Or, if you want new topics, have a separate
+ * function for that.  Maybe the 'verbose function trace logging'
+ * should use *this* instead of subLogger.
+ * 
+ * In any case, `subLogger` should probably be given a better name,
+ * and/or split `Logger` into more logical interfaces.
+*/
+class MessagePrefixSubLogger implements SimpleLogger {
+	#logger : SimpleLogger;
+	#messagePrefix : string;
+	constructor(logger: SimpleLogger, messagePrefix:string='') {
+		this.#logger = logger;
+		this.#messagePrefix = messagePrefix;
+	}
+	subLager(path: string) : MessagePrefixSubLogger {
+		return new MessagePrefixSubLogger(
+			this.#logger,
+			this.#messagePrefix == '' ? path : this.#messagePrefix + '/' + path
+		);
+	}
+	info(text:string) {
+		this.#logger.info(
+			(this.#messagePrefix == '' ? '' : this.#messagePrefix+': ') +
+			text
+		);
+	}
+}
+
+function detailLogger(logger:SimpleLogger, path:string) : SimpleLogger {
+	if( logger instanceof MessagePrefixSubLogger ) return logger.subLager(path);
+	return new MessagePrefixSubLogger(logger, path);
+}
+
 // Maybe it'd be better to just have MQTTishMessages
 // so that you could make streams of them and use
 // regular stream operations.
@@ -45,7 +99,7 @@ async function attemptToConnect(
 	opts: {
 		forceDance?  : boolean,
 		abortSignal? : AbortSignal,
-		logger?      : Logger,
+		logger?      : SimpleLogger,
 	} = {}
 ) : Promise<Device> {
 	let device : Device|undefined;
@@ -195,7 +249,7 @@ class WBBConnectorV2 extends ProcessGroup {
 					// TODO: timeout after, like, 20 seconds idk
 					try {
 						const devLogger : Logger = this.#logger.subLogger(`devices/${devState.name}`);
-						const attLogger : Logger = this.#logger.subLogger(`attempt-to-connect/${devState.name}`);
+						const attLogger : SimpleLogger = detailLogger(this.#logger, `attempt-to-connect/${devState.name}`);
 						devState.bluezDevice = await attemptToConnect(
 							adapter, devState.macAddress,
 							(status) => devLogger.update("status", status ?? "", true),

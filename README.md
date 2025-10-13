@@ -68,11 +68,13 @@ See [multioscify-demo](./multioscify-demo) for usage example.
 
 Maybe try `usermod -a -G input $your_username`.
 
+### Bluetooth!!!!
 
-## TODO
+Things to try in `bluetoothctl` to get things working:
 
-- [ ] maybe readers should allow multiple targets?
-  - shouldn't need to restart reader when target changes
-- [ ] An orchestrator that automatically controls `multioscify` based on path guesses from `wbbconnector`
-  - Probably will want to use shared environment variables defined in a `.env.sh` to configure
-    all these things
+```
+scan on
+advertise on
+pairable on
+power off     # Yeah, off.  Sometimes that fixes it???
+```

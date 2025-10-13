@@ -2,7 +2,12 @@
 
 exitcode=69
 
-while [ $exitcode -eq 69 ]
+# TODO: An option for whether to quit
+# or restart, and how long to wait,
+# given different exit codes.
+
+# while [ $exitcode -eq 69 ]
+while true
 do
 	echo "# looper: Starting $1..."
 	"$@"
@@ -10,7 +15,16 @@ do
 	echo "# looper: $1 exited with status $exitcode"
 	if [ $exitcode -eq 69 ]
 	then
-		echo "# looper: Will restart in 2 seconds"
+		continue=1
+		sleeptime=1
+	else
+		continue=0
+		sleeptime=5
+	fi
+	
+	if [ "$continue" -eq "1" ]
+	then
+		echo "# looper: Will restart in $sleeptime seconds"
 	else
 		echo "# looper: Will exit with code $exitcode"
 	fi

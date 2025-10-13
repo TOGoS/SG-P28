@@ -2,7 +2,7 @@ import AABB2D from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/
 import * as ansi from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/ansi.ts';
 import { BDC_PROP_VALUES } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/boxcharprops.ts';
 import { makeChildLineBorderGenerator } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/boxdrawcomponents2.ts';
-import { AbstractComponentWrapper, AbstractRasterable, BoundedRasterable, FixedRasterable, makeFlex, makeSolidGenerator, PackedRasterable, RegionRasterable, SizedRasterable, SizeFillingRasterableGenerator } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/components2.ts';
+import { AbstractComponentWrapper, AbstractRasterable, BoundedRasterable, FixedRasterable, FlexOptions, makeFlex, makeSolidGenerator, PackedRasterable, RegionRasterable, SizedRasterable, SizeFillingRasterableGenerator } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/components2.ts';
 import TextRaster2, { Style } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/TextRaster2.ts';
 import { drawTextToRaster, textToRaster } from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/textraster2utils.ts';
 import Vec2D from 'https://deno.land/x/scratch38s15@0.0.14/src/lib/ts/termdraw/Vec2D.ts';
@@ -15,6 +15,7 @@ import { AbstractAppInstance } from 'https://deno.land/x/scratch38s15@0.0.14/src
 import ProcessLike from './src/main/ts/process/ProcessLike.ts';
 import { functionToProcessLike } from './src/main/ts/process/util.ts';
 import { formatTargetSpec, parseTargetSpec, TargetSpec } from "./src/main/ts/sink/sinkspec.ts";
+import { leftPad } from './src/main/ts/leftPad.ts';
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -42,37 +43,50 @@ const toBeLined = makeChildLineBorderGenerator(BDC_PROP_VALUES.LIGHT, ansi.WHITE
 
 const flexySpace = makeSolidGenerator(" ", "");
 
-function mkTextRasterable(spans:{text:string, style:Style}[], background=blackBackground) : AbstractRasterable {
+const S_PAD = Symbol("pad");
+
+function mkTextRasterable(
+	spans:({text:string, style:Style}|typeof S_PAD)[],
+	background=blackBackground,
+	flexOpts : Omit<FlexOptions, "alongDirection"> = {
+		alongBeforeSpace: 1,
+		alongAfterSpace: 1,
+	}
+) : AbstractRasterable {
 	return makeFlex("right", background, [
-		...spans.map(span => {
-			const rast = textToRaster(span.text, span.style);
-			return {
-				component: new FixedRasterable(rast),
+		...spans.map(span =>
+			span == S_PAD ? {
+				// This bit is necessary because there's not yet any way
+				// to tell a component to align itself right or left
+				// (default is to center everything)
+				// the padding ensures that it fills the entire space,
+				// so alignment is irrelevant.
+				component: flexySpace,
+				flexGrowAlong: 1,
+				flexGrowAcross: 0,
+				flexShrinkAlong: 1,
+				flexShrinkAcross: 0,
+			} : {
+				component: new FixedRasterable(textToRaster(span.text, span.style)),
 				flexGrowAlong: 0,
 				flexGrowAcross: 0,
 				flexShrinkAlong: 0,
 				flexShrinkAcross: 0,
 			}
-		}),
-		{
-			// This bit is necessary because there's not yet any way
-			// to tell a component to align itself right or left
-			// (default is to center everything)
-			// the padding ensures that it fills the entire space,
-			// so alignment is irrelevant.
-			component: flexySpace,
-			flexGrowAlong: 1,
-			flexGrowAcross: 0,
-			flexShrinkAlong: 1,
-			flexShrinkAcross: 0,
-		}
-	], {
-		alongBeforeSpace: 1,
-		alongAfterSpace: 1,
-	}); // Maybe add a padding one at the end
+		)
+	], flexOpts);
 }
 
-function prettyConnectionStatus(status:ConnectionStatus<TargetSpec>) {
+function mkRightPaddedTextRasterable(spans:{text:string, style:Style}[], background=blackBackground,
+	flexOpts : Omit<FlexOptions, "alongDirection"> = {
+		alongBeforeSpace: 1,
+		alongAfterSpace: 1,
+	}
+) : AbstractRasterable {
+	return mkTextRasterable([...spans, S_PAD], background, flexOpts);
+}
+
+function prettyConnectionStatus(status:ConnectionStatus<TargetSpec>) : StyledTextFragment[] {
 	// TODO: left or right-pad 'connected' / 'connecting'
 	return status.status == "connected" ? [
 		{text:status.status, style:ansi.BRIGHT_GREEN_TEXT},
@@ -87,6 +101,31 @@ function prettyConnectionStatus(status:ConnectionStatus<TargetSpec>) {
 	[
 		{text:status.status, style:ansi.BRIGHT_RED_TEXT},
 	];
+}
+
+function prettyClockTime(millis:TimestampMilliseconds|undefined) : StyledTextFragment[] {
+	if( millis == undefined ) return [{text:"clock not set", style:ansi.MAGENTA_TEXT}];
+	
+	const date = new Date(millis);
+	return [
+		{
+			text: `${date.getFullYear()}-${leftPad("00", String(date.getMonth() + 1))}-${leftPad("00", String(date.getDate()))} ${leftPad("00", String(date.getHours()))}:${leftPad("00", String(date.getMinutes()))}:${leftPad("00", String(date.getSeconds()))}`,
+			style: ansi.BRIGHT_BLACK_TEXT
+		}
+	];
+}
+
+function prettyDuration(millis:TimestampMilliseconds) : string {
+	const totalSeconds = Math.floor(millis / 1000);
+	const hours        = Math.floor(totalSeconds / 3600);
+	const minutes      = Math.floor((totalSeconds % 3600) / 60);
+	const seconds      = (totalSeconds % 60) + (Math.floor(millis) % 1000) / 1000;
+
+	let result = "";
+	if (hours > 0) result += `${hours}h`;
+	if (minutes > 0 || hours > 0) result += `${minutes}m`;
+	result += `${seconds.toFixed(2)}s`;
+	return result;
 }
 
 function padSides(component : AbstractRasterable) {
@@ -284,6 +323,24 @@ function walkMessageTree<M>(path:string[], tree:MessageTree<M>|MutableMessageTre
 const S_UNINITIALIZED    = Symbol.for("uninitialized");
 const S_REDRAW_REQUESTED = Symbol.for("redraw-requested");
 
+type TimestampMilliseconds = number & { unit?:"epoch-milliseconds" };
+
+function styleMessageValue(message:MQTTMessage) : StyledTextFragment[] {
+	// Hmm: Could also take age of message into account, etc
+	const text = message.valueText;
+	if( text == "online" || text == "connected" ) {
+		return [{ text, style: ansi.BRIGHT_GREEN_TEXT }];
+	} else if( text == "connecting" || text == "trusted" || text == "paired" ) {
+		return [{ text, style: ansi.BRIGHT_YELLOW_TEXT }];
+	} else if( text == "offline" || text == "disconnected" ) {
+		return [{ text, style: ansi.BRIGHT_RED_TEXT }];
+	} else if( text == undefined ) {
+		return [{ text: `(${message.value.length} bytes)`, style: ansi.MAGENTA_TEXT }];
+	} else {
+		return [{ text, style: "" }];
+	}
+}
+	
 class Dashboard implements SizedRasterable {
 	#ctx : PossiblyTUIAppContext
 	#connectionStatus : ConnectionStatus<TargetSpec> = {"status":"not-connected"};
@@ -291,6 +348,8 @@ class Dashboard implements SizedRasterable {
 	// Map of all current MQTT values
 	#messageTree : MessageTree<MQTTMessage>|MutableMessageTree<MQTTMessage> = EMPTY_MESSAGE_TREE;
 	#logMessages : string[] = [];
+	#startTime : TimestampMilliseconds|undefined;
+	#clockTime : TimestampMilliseconds|undefined;
 	
 	constructor(ctx:PossiblyTUIAppContext) {
 		this.#ctx = ctx;
@@ -299,28 +358,21 @@ class Dashboard implements SizedRasterable {
 	#viewState : SizedRasterable|typeof S_UNINITIALIZED|typeof S_REDRAW_REQUESTED = S_UNINITIALIZED;
 	
 	generateViewState() : SizedRasterable {
-		const statusBox = mkTextRasterable(prettyConnectionStatus(this.#connectionStatus));
+		const statusBox = mkTextRasterable([
+			...prettyConnectionStatus(this.#connectionStatus),
+			S_PAD,
+			...prettyClockTime(this.#clockTime),
+			...(this.#startTime && this.#clockTime ? [
+				{text:` (up ${prettyDuration(this.#clockTime - this.#startTime)})`, style:""}
+			] : [])
+		]);
 		const logBox = padSides(new AbstractTextRasterable(blackBackground, this.#logMessages.map(text => [{text,style:""}])));
 		
 		// TODO: LogRasterable should accept spans so it can be pretty
 		// TODO: Pad the keys maybe?
 		const statusLines : StyledTextFragment[][] = [];
-				
-		const maxShownMessageCount = 3;
 		
-		function styleMessageValue(message:MQTTMessage) : StyledTextFragment[] {
-			// Hmm: Could also take age of message into account, etc
-			const text = message.valueText;
-			if( text == "online" ) {
-				return [{ text, style: ansi.BRIGHT_GREEN_TEXT }];
-			} else if( text == "offline" ) {
-				return [{ text, style: ansi.BRIGHT_RED_TEXT }];
-			} else if( text == undefined ) {
-				return [{ text: `(${message.value.length} bytes)`, style: ansi.MAGENTA_TEXT }];
-			} else {
-				return [{ text, style: "" }];
-			}
-		}
+		const maxShownMessageCount = 3;
 		
 		walkMessageTree([], this.#messageTree, (path,node) => {
 			if( path.length == 0 ) return; // Hopefully no messages here lamo
@@ -395,14 +447,22 @@ class Dashboard implements SizedRasterable {
 		return this.#viewState;
 	}
 	
+	#lastRedrawTime : number|undefined;
+	
 	rasterForSize(size : Vec2D<number>) : TextRaster2 {
+		this.#lastRedrawTime = Date.now();
 		return this._viewState.rasterForSize(size);
 	}
 	
 	_requestRedraw() {
 		// It will become something else once the redraw has started.
 		// Until then, we don't need to keep poking #ctx about it.
-		if( this.#viewState == S_REDRAW_REQUESTED ) return;
+		//
+		// Ackshually, I think TUIRenderStateManager, which does its own debouncing,
+		// has a bug where redraw requests will occasionally be lost;
+		// therefore we'll keep poking it, after all:
+		// 
+		// if( this.#viewState == S_REDRAW_REQUESTED ) return;
 		this.#viewState = S_REDRAW_REQUESTED;
 		this.#ctx.setScene(this);
 	}
@@ -410,6 +470,20 @@ class Dashboard implements SizedRasterable {
 	set connectionStatus(status:ConnectionStatus<TargetSpec>) {
 		// throw new Error(`Setting connection status to ${JSON.stringify(status)}!`);
 		this.#connectionStatus = status;
+		this._requestRedraw();
+	}
+	
+	set startTime(millis:TimestampMilliseconds) {
+		this.#startTime = millis;
+		this._requestRedraw();
+	}
+	set clockTime(millis:TimestampMilliseconds) {
+		if( this.#lastRedrawTime && millis - this.#lastRedrawTime > 2000 ) {
+			console.error(`Too long since last redraw! viestate = ${String(this.#viewState)}`);
+			Deno.exit(1);
+		}
+		
+		this.#clockTime = millis;
 		this._requestRedraw();
 	}
 	
@@ -466,13 +540,18 @@ class DashboardAppInstance extends AbstractAppInstance<KeyEvent,number> {
 	#sourceSpec : TargetSpec;
 	#dashboard : Dashboard;
 	#mqttClient : MqttClient|undefined;
+	#clockTimer : number|undefined;
 
 	constructor(sourceSpec:TargetSpec, ctx:PossiblyTUIAppContext) {
 		super(ctx);
 		this.#sourceSpec = sourceSpec;
 		this.#dashboard = new Dashboard(ctx);
+		this.#dashboard.startTime = Date.now();
 		this.#dashboard.connectionStatus = {status: "connecting", target: sourceSpec };
 		this._connect();
+		this.#clockTimer = setInterval(() => {
+			this.#dashboard.clockTime = Date.now()
+		}, 1000);
 	}
 	
 	_requestCleanExit(result:number) {
@@ -504,6 +583,10 @@ class DashboardAppInstance extends AbstractAppInstance<KeyEvent,number> {
 		if( this.#mqttClient ) {
 			this.#dashboard.log("Disconnecting for _cleanup");
 			this.#mqttClient.disconnect();
+		}
+		if( this.#clockTimer ) {
+			clearInterval(this.#clockTimer);
+			this.#clockTimer = undefined;
 		}
 		return super._cleanup();
 	}

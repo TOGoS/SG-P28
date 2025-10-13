@@ -55,8 +55,42 @@ Then walk the tree to figure out what's going on re: devices.
 
 ## 2025-10-12
 
-- [ ] Fix logging somewhat - MQTTLogger#subLogger should either
+### TODO
+
+- [\] Fix logging somewhat - MQTTLogger#subLogger should either
   do something different, or not be used for logging from functions
-- [ ] Improve online/offline display in dashboard.ts
+  - Eh, 
+- [X] Improve online/offline display in dashboard.ts
+  - Color-coded!
+- [X] Have a clock so I can tell if dashboard itself is updating!
+  - This led to realizing there is probably a race condition in the TUI framework
 - [ ] Indicate time since value changed somehow
-- [ ] Have a clock so I can tell if dashboard itself is updating!
+
+## 2025-10-13
+
+### Dashboard sometimes stops updating
+
+Sometimes dashboard would stop updating.
+
+I suspect a big in `TUIRenderStateManager#requestRedraw`.
+
+Could debug by switching dashboard.ts to use local version of S38-S15.
+
+### TODOs from README, relevance unclear
+
+- [ ] maybe readers should allow multiple targets?
+  - shouldn't need to restart reader when target changes
+- [ ] An orchestrator that automatically controls `multioscify` based on path guesses from `wbbconnector`
+  - Probably will want to use shared environment variables defined in a `.env.sh` to configure
+    all these things
+
+### TODO
+
+- [ ] wbbconnector: Standardize WBB connection statuses;
+  sometimes status is undefined, other times it's 'offline';
+  shouldn't that be 'disconnected' if the good state is 'connected'?
+- [ ] Dashboard: Indicate retain flag
+- [ ] Dashboard: Indicate freshness of values somehow, at least the 'status' ones
+- [ ] Have multioscify publish more info to MQTT
+  - [ ] What it's up to; currently it just sits there, not clear if doing anything!
+  - [ ] Read values!

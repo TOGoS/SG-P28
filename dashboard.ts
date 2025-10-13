@@ -106,14 +106,18 @@ function padSides(component : AbstractRasterable) {
 
 const ZERO_BOUNDS : AABB2D<number> = {x0:0, y0:0, x1:0, y1:0};
 
-class AbstractLogRasterable implements AbstractRasterable, PackedRasterable, BoundedRasterable, SizeFillingRasterableGenerator {
+interface StyledTextFragment {
+	text: string;
+	style: Style;
+}
+
+class AbstractTextRasterable implements AbstractRasterable, PackedRasterable, BoundedRasterable, SizeFillingRasterableGenerator {
 	readonly #background : RegionRasterable;
-	readonly #logMessages : string[];
+	readonly textLines : StyledTextFragment[][];
 	readonly #bounds : AABB2D<number>;
-	readonly #textStyle = "";
-	constructor(background:RegionRasterable, logMessages:string[], bounds:AABB2D<number>=ZERO_BOUNDS) {
+	constructor(background:RegionRasterable, logMessages:StyledTextFragment[][], bounds:AABB2D<number>=ZERO_BOUNDS) {
 		this.#background = background;
-		this.#logMessages = logMessages;
+		this.textLines = logMessages;
 		this.#bounds = bounds;
 	}
 	get bounds() { return this.#bounds; }
@@ -136,15 +140,21 @@ class AbstractLogRasterable implements AbstractRasterable, PackedRasterable, Bou
 		*/
 	}
 	fillSize(size: Vec2D<number>): BoundedRasterable {
-		return new AbstractLogRasterable(this.#background, this.#logMessages, {
+		return new AbstractTextRasterable(this.#background, this.textLines, {
 			x0: 0, y0: -size.y,
 			x1: size.x, y1: 0
 		});
 	}
 	rasterForRegion(region: AABB2D<number>): TextRaster2 {
 		let rast = this.#background.rasterForRegion(region);
-		for( let y=rast.size.y-1, i=this.#logMessages.length-1; y >= 0 && i >= 0; --y, --i ) {
-			rast = drawTextToRaster(rast, {x:0, y}, this.#logMessages[i], this.#textStyle);
+		// HMM: Maybe the thing to do is just create the raster ourselves here,
+		// using toChars to get the length of bits of text actually right
+		for( let y=rast.size.y-1, i=this.textLines.length-1; y >= 0 && i >= 0; --y, --i ) {
+			let x = 0;
+			for( const frag of this.textLines[i] ) {
+				rast = drawTextToRaster(rast, {x, y}, frag.text, frag.style);
+				x += frag.text.length; // OOPS: should be length in glyphs!
+			}
 		}
 		return rast;
 	}
@@ -290,36 +300,49 @@ class Dashboard implements SizedRasterable {
 	
 	generateViewState() : SizedRasterable {
 		const statusBox = mkTextRasterable(prettyConnectionStatus(this.#connectionStatus));
-		const logBox = padSides(new AbstractLogRasterable(blackBackground, this.#logMessages));
+		const logBox = padSides(new AbstractTextRasterable(blackBackground, this.#logMessages.map(text => [{text,style:""}])));
 		
 		// TODO: LogRasterable should accept spans so it can be pretty
 		// TODO: Pad the keys maybe?
-		const attrTexts : string[] = [];
-		
+		const statusLines : StyledTextFragment[][] = [];
+				
 		const maxShownMessageCount = 3;
+		
+		function styleMessageValue(message:MQTTMessage) : StyledTextFragment[] {
+			// Hmm: Could also take age of message into account, etc
+			const text = message.valueText;
+			if( text == "online" ) {
+				return [{ text, style: ansi.BRIGHT_GREEN_TEXT }];
+			} else if( text == "offline" ) {
+				return [{ text, style: ansi.BRIGHT_RED_TEXT }];
+			} else if( text == undefined ) {
+				return [{ text: `(${message.value.length} bytes)`, style: ansi.MAGENTA_TEXT }];
+			} else {
+				return [{ text, style: "" }];
+			}
+		}
 		
 		walkMessageTree([], this.#messageTree, (path,node) => {
 			if( path.length == 0 ) return; // Hopefully no messages here lamo
-			
+			const keyStyle = "";
 			const prefix = "  ".repeat(path.length-1)+path[path.length-1];
 			if( node.messages.length == 0 ) {
-				attrTexts.push(prefix);
+				statusLines.push([{text:prefix, style:keyStyle}]);
 			} else if( node.messages.length == 1 ) {
-				attrTexts.push(prefix+": "+node.messages[0].valueText);
+				statusLines.push([{text:prefix+": ",style:keyStyle}, ...styleMessageValue(node.messages[0])]);
 			} else {
-				attrTexts.push(prefix+":");
+				statusLines.push([{text:prefix+":", style:keyStyle}]);
 				
 				const messagePrefix = "  ".repeat(path.length) + "- ";
 				for( let i=Math.max(0, node.messages.length-maxShownMessageCount); i<node.messages.length; ++i ) {
-					const message = node.messages[i];
-					attrTexts.push(messagePrefix + message.valueText);
+					statusLines.push([{text:messagePrefix,style:keyStyle}, ...styleMessageValue(node.messages[i])]);
 				}
 			}
 		});
 		
-		const attrBox = padSides(new AbstractLogRasterable(blackBackground, attrTexts, {
+		const attrBox = padSides(new AbstractTextRasterable(blackBackground, statusLines, {
 			x0: 0, y0: 0,
-			x1: 0, y1: attrTexts.length,
+			x1: 0, y1: statusLines.length,
 		}));
 		
 		const flex = makeFlex("down", toBeLined, [

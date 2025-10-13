@@ -115,17 +115,42 @@ function prettyClockTime(millis:TimestampMilliseconds|undefined) : StyledTextFra
 	];
 }
 
-function prettyDuration(millis:TimestampMilliseconds) : string {
+function prettyDurationHms(millis:TimestampMilliseconds) : string {
 	const totalSeconds = Math.floor(millis / 1000);
 	const hours        = Math.floor(totalSeconds / 3600);
 	const minutes      = Math.floor((totalSeconds % 3600) / 60);
-	const seconds      = (totalSeconds % 60) + (Math.floor(millis) % 1000) / 1000;
-
+	//const seconds      = (totalSeconds % 60) + (Math.floor(millis) % 1000) / 1000;
+	const seconds      = totalSeconds % 60;
+	
 	let result = "";
 	if (hours > 0) result += `${hours}h`;
 	if (minutes > 0 || hours > 0) result += `${minutes}m`;
-	result += `${seconds.toFixed(2)}s`;
+	//result += `${seconds.toFixed(2)}s`;
+	result += `${seconds}s`;
 	return result;
+}
+
+function prettyRoughDuration(millis:TimestampMilliseconds) : StyledTextFragment {
+	if( millis < 1000 ) {
+		// Includes negative values, lmao
+		return {text: "0s", style:ansi.GREEN_TEXT};
+	}
+	const seconds = Math.round(millis/1000);
+	if( seconds < 10 ) {
+		return {text: seconds+"s", style:ansi.GREEN_TEXT};
+	}
+	if( seconds < 60 ) {
+		return {text: seconds+"s", style:ansi.YELLOW_TEXT};
+	}
+	const minutes = Math.round(seconds/60);
+	if( minutes < 5 ) {
+		return {text: minutes+"m", style:ansi.WHITE_TEXT}; // 'gray'
+	}
+	if( minutes < 60 ) {
+		return {text: minutes+"m", style:ansi.BRIGHT_BLACK_TEXT};
+	}
+	const hours = Math.round(minutes/60);
+	return {text: hours+"h", style:ansi.BRIGHT_BLACK_TEXT};
 }
 
 function padSides(component : AbstractRasterable) {
@@ -206,7 +231,8 @@ interface MessageInfo<V> {
 }
 
 interface MQTTMessage extends MessageInfo<Uint8Array> {
-	valueText: string|undefined
+	valueText: string|undefined;
+	retained: boolean;
 }
 
 interface DeviceInfo {
@@ -300,20 +326,44 @@ const S_REDRAW_REQUESTED = Symbol.for("redraw-requested");
 
 type TimestampMilliseconds = number & { unit?:"epoch-milliseconds" };
 
-function styleMessageValue(message:MQTTMessage) : StyledTextFragment[] {
+function styleMessageValue(message:MQTTMessage, currentTime:TimestampMilliseconds|undefined) : StyledTextFragment[] {
 	// Hmm: Could also take age of message into account, etc
+	const age = currentTime == undefined ? undefined : currentTime - message.received;
 	const text = message.valueText;
-	if( text == "online" || text == "connected" ) {
-		return [{ text, style: ansi.BRIGHT_GREEN_TEXT }];
-	} else if( text == "connecting" || text == "trusted" || text == "paired" ) {
-		return [{ text, style: ansi.BRIGHT_YELLOW_TEXT }];
-	} else if( text == "offline" || text == "disconnected" ) {
-		return [{ text, style: ansi.BRIGHT_RED_TEXT }];
-	} else if( text == undefined ) {
-		return [{ text: `(${message.value.length} bytes)`, style: ansi.MAGENTA_TEXT }];
-	} else {
-		return [{ text, style: "" }];
+	const flagBits : StyledTextFragment[] = [];
+	if( message.retained ) flagBits.push({text:"R", style:ansi.BRIGHT_WHITE_TEXT});
+	if( age ) {
+		flagBits.push(prettyRoughDuration(Math.floor(age)));
 	}
+	
+	const textBits : StyledTextFragment[] =
+		text == "online" || text == "connected" ?
+			[{ text, style: ansi.BRIGHT_GREEN_TEXT }] :
+		text == "connecting" || text == "trusted" || text == "paired" ?
+			[{ text, style: ansi.BRIGHT_YELLOW_TEXT }] :
+		text == "offline" || text == "disconnected" ?
+			[{ text, style: ansi.BRIGHT_RED_TEXT }] :
+		text == undefined ?
+			[{ text: `(${message.value.length} bytes)`, style: ansi.MAGENTA_TEXT }] :
+		/*otherwise*/
+			[{ text, style: "" }];
+			
+	const metaBits = [];
+	if( flagBits.length > 0 ) {
+		metaBits.push({text:"[", style:ansi.YELLOW_TEXT});
+		let sepBit = undefined;
+		for( const bit of flagBits ) {
+			if( sepBit ) metaBits.push(sepBit);
+			metaBits.push(bit);
+			sepBit = {text:",", style:ansi.YELLOW_TEXT};
+		}
+		metaBits.push({text:"] ", style:ansi.YELLOW_TEXT});
+	}
+	
+	return [
+		...metaBits,
+		...textBits,
+	]
 }
 	
 class Dashboard implements SizedRasterable {
@@ -338,7 +388,7 @@ class Dashboard implements SizedRasterable {
 			S_PAD,
 			...prettyClockTime(this.#clockTime),
 			...(this.#startTime && this.#clockTime ? [
-				{text:` (up ${prettyDuration(this.#clockTime - this.#startTime)})`, style:""}
+				{text:` (up ${prettyDurationHms(this.#clockTime - this.#startTime)})`, style:""}
 			] : [])
 		]);
 		const logBox = padSides(new AbstractTextRasterable(blackBackground, this.#logMessages.map(text => [{text,style:""}])));
@@ -356,13 +406,13 @@ class Dashboard implements SizedRasterable {
 			if( node.messages.length == 0 ) {
 				statusLines.push([{text:prefix, style:keyStyle}]);
 			} else if( node.messages.length == 1 ) {
-				statusLines.push([{text:prefix+": ",style:keyStyle}, ...styleMessageValue(node.messages[0])]);
+				statusLines.push([{text:prefix+": ",style:keyStyle}, ...styleMessageValue(node.messages[0], this.#clockTime)]);
 			} else {
 				statusLines.push([{text:prefix+":", style:keyStyle}]);
 				
 				const messagePrefix = "  ".repeat(path.length) + "- ";
 				for( let i=Math.max(0, node.messages.length-maxShownMessageCount); i<node.messages.length; ++i ) {
-					statusLines.push([{text:messagePrefix,style:keyStyle}, ...styleMessageValue(node.messages[i])]);
+					statusLines.push([{text:messagePrefix,style:keyStyle}, ...styleMessageValue(node.messages[i], this.#clockTime)]);
 				}
 			}
 		});
@@ -596,6 +646,7 @@ class DashboardAppInstance extends AbstractAppInstance<KeyEvent,number> {
 					key: evt.detail.topic,
 					value: evt.detail.payload,
 					valueText: attemptTextDecode(evt.detail.payload),
+					retained: evt.detail.retain,
 				};
 				this.#dashboard.update(messageInfo);
 			});

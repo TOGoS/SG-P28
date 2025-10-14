@@ -309,6 +309,14 @@ function messageTreeIsEmpty<M>(tree:SomeMessageTree<M>) : boolean {
 	return tree.children.size == 0 && tree.messages.length == 0;
 }
 
+/**
+ * Removes messages from the tree that don't match the filter and prunes empty branches
+ * @param tree The message tree to trim
+ * @param messageFilter Predicate function that determines which messages to keep
+ * @returns A MessageTree with filtered messages and pruned empty branches,
+ *   possibly a new instance, possibly the original,
+ *   or EMPTY_MESSAGE_TREE if nothing remains.
+ */
 function pruneMessageTree<M>(tree:MessageTree<M>, messageFilter:(message:Readonly<M>)=>boolean) : MessageTree<M> {
 	if( tree === EMPTY_MESSAGE_TREE ||
 		(tree.children.size == 0 && tree.messages.length == 0)

@@ -339,10 +339,23 @@ function pruneMessageTree<M>(tree:MessageTree<M>, messageFilter:(message:Readonl
 	return { messages, children };
 }
 
-function walkMessageTree<M>(path:string[], tree:SomeMessageTree<M>, callback:(path:string[], node:MessageTree<M>|MutableMessageTree<M>)=>unknown) {
-	callback(path, tree);
-	for( const [k,child] of tree.children ) {
-		walkMessageTree([...path, k], child, callback);
+/**
+ * Recursively traverses a message tree, invoking a callback for each node.
+ * Does not recurse into nodes for which the callback returns false.
+ *
+ * @template M - Type of messages stored in the tree
+ * @param {string[]} path - Current path in the tree
+ * @param {SomeMessageTree<M>} tree - The root node of the message tree to traverse
+ * @param {(path: string[], node: MessageTree<M>|MutableMessageTree<M>) => boolean} callback - Function called for each node
+ *    If the callback returns `true`, traversal continues to the node's children.
+ *    If it returns `false`, traversal does not descend into that node's children.
+ * @returns {void}
+ */
+function walkMessageTree<M>(path:string[], tree:SomeMessageTree<M>, callback:(path:string[], node:MessageTree<M>|MutableMessageTree<M>)=>boolean) {
+	if( callback(path, tree) ) {
+		for( const [k,child] of tree.children ) {
+			walkMessageTree([...path, k], child, callback);
+		}
 	}
 }
 
@@ -431,7 +444,9 @@ class Dashboard implements SizedRasterable {
 		);
 		
 		walkMessageTree([], this.#messageTree, (path,node) => {
-			if( path.length == 0 ) return; // Hopefully no messages here lamo
+			if( path.length == 0 ) return true; // Hopefully no messages here lamo
+			if( path[path.length-1] == "chat" ) return false;
+			
 			const keyStyle = "";
 			const prefix = "  ".repeat(path.length-1)+path[path.length-1];
 			if( node.messages.length == 0 ) {
@@ -446,6 +461,7 @@ class Dashboard implements SizedRasterable {
 					statusLines.push([{text:messagePrefix,style:keyStyle}, ...styleMessageValue(node.messages[i], this.#clockTime)]);
 				}
 			}
+			return true;
 		});
 		
 		const attrBox = padSides(new AbstractTextRasterable(blackBackground, statusLines, {

@@ -114,8 +114,16 @@ it is only using 2% CPU, so maybe not a bottleneck just yet.
 - [ ] wbbconnector: Standardize WBB connection statuses;
   sometimes status is undefined, other times it's 'offline';
   shouldn't that be 'disconnected' if the good state is 'connected'?
+  - [Homie](https://homieiot.github.io/specification/) uses '$state' instead of 'status',
+    and 'connected'/'disconnected'/'lost' instead of 'online'/'offline'.
+	 - For the most part I don't give a shit about Homie; it seems a bit
+	   over-engineered and sprinkles dollar signs seemingly at random.
+	 - Maybe I intended at some point to standardize on 'connected'/'disconnected'.
+	   I don't really care to distinguish between 'disconnected' and 'lost',
+	   though maybe I should just let everything be 'lost' by default.
 - [ ] Dashboard: Indicate retain flag
 - [ ] Dashboard: Indicate freshness of values somehow, at least the 'status' ones
 - [ ] Have multioscify publish more info to MQTT
+  - [ ] Maybe a 'summary' attribute, indicating basics of configuration, current status
   - [ ] What it's up to; currently it just sits there, not clear if doing anything!
   - [ ] Read values!

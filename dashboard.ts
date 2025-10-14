@@ -235,14 +235,6 @@ interface MQTTMessage extends MessageInfo<Uint8Array> {
 	retained: boolean;
 }
 
-interface DeviceInfo {
-	name     : string;
-	status   : string;
-	className: string;
-	chat     : string[];
-	attributes: Map<string,string>;
-}
-
 // Sometimes-immutable MessageTree structure
 
 type MutableMessageTree<M> = {
@@ -369,7 +361,6 @@ function styleMessageValue(message:MQTTMessage, currentTime:TimestampMillisecond
 class Dashboard implements SizedRasterable {
 	#ctx : PossiblyTUIAppContext
 	#connectionStatus : ConnectionStatus<TargetSpec> = {"status":"not-connected"};
-	#deviceInfo : Map<string,DeviceInfo> = new Map();
 	// Map of all current MQTT values
 	#messageTree : MessageTree<MQTTMessage>|MutableMessageTree<MQTTMessage> = EMPTY_MESSAGE_TREE;
 	#logMessages : string[] = [];

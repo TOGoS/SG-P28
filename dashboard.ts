@@ -247,6 +247,7 @@ type MessageTree<M> = Readonly<{
 	readonly	messages: ReadonlyArray<M>;
 	readonly children: ReadonlyMap<string, MessageTree<M>>;
 }>;
+type SomeMessageTree<M> = MessageTree<M>|MutableMessageTree<M>;
 
 function messageTreeIsFrozen<M>(tree:MessageTree<M>|MutableMessageTree<M>) : tree is MessageTree<M> {
 	return Object.isFrozen(tree);
@@ -304,7 +305,22 @@ function updateMessageTree<M>(
 	return _updateMessageTree(tree, parts, message, historySize);
 }
 
-function walkMessageTree<M>(path:string[], tree:MessageTree<M>|MutableMessageTree<M>, callback:(path:string[], node:MessageTree<M>|MutableMessageTree<M>)=>unknown) {
+function trimMessageTree<M>(tree:SomeMessageTree<M>, messageFilter:(message:M)=>boolean) : MessageTree<M> {
+	if( tree === EMPTY_MESSAGE_TREE ||
+		(tree.children.size == 0 && tree.messages.length == 0)
+	) return EMPTY_MESSAGE_TREE;
+	
+	const children = new Map(tree.children.entries().map(
+		([k, child]) => [k, trimMessageTree(child, messageFilter)] as [string,MessageTree<M>]
+	).filter(
+		([k, child]) => child.messages.length > 0 || child.children.size > 0
+	));
+	const messages = tree.messages.filter(messageFilter);
+	if( children.size == 0 && messages.length == 0 ) return EMPTY_MESSAGE_TREE;
+	return { messages, children };
+}
+
+function walkMessageTree<M>(path:string[], tree:SomeMessageTree<M>, callback:(path:string[], node:MessageTree<M>|MutableMessageTree<M>)=>unknown) {
 	callback(path, tree);
 	for( const [k,child] of tree.children ) {
 		walkMessageTree([...path, k], child, callback);
@@ -389,6 +405,8 @@ class Dashboard implements SizedRasterable {
 		const statusLines : StyledTextFragment[][] = [];
 		
 		const maxShownMessageCount = 3;
+		
+		this.#messageTree = trimMessageTree(this.#messageTree, m => m.value.length > 0);
 		
 		walkMessageTree([], this.#messageTree, (path,node) => {
 			if( path.length == 0 ) return; // Hopefully no messages here lamo

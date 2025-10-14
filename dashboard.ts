@@ -305,18 +305,29 @@ function updateMessageTree<M>(
 	return _updateMessageTree(tree, parts, message, historySize);
 }
 
-function trimMessageTree<M>(tree:SomeMessageTree<M>, messageFilter:(message:M)=>boolean) : MessageTree<M> {
+function messageTreeIsEmpty<M>(tree:SomeMessageTree<M>) : boolean {
+	return tree.children.size == 0 && tree.messages.length == 0;
+}
+
+function pruneMessageTree<M>(tree:MessageTree<M>, messageFilter:(message:Readonly<M>)=>boolean) : MessageTree<M> {
 	if( tree === EMPTY_MESSAGE_TREE ||
 		(tree.children.size == 0 && tree.messages.length == 0)
 	) return EMPTY_MESSAGE_TREE;
 	
-	const children = new Map(tree.children.entries().map(
-		([k, child]) => [k, trimMessageTree(child, messageFilter)] as [string,MessageTree<M>]
-	).filter(
-		([k, child]) => child.messages.length > 0 || child.children.size > 0
-	));
-	const messages = tree.messages.filter(messageFilter);
+	const filteredChildren = new Map<string,MessageTree<M>>();
+	let anyChildrenChanged = false;
+	for( const [k,child] of tree.children ) {
+		const filteredChild = pruneMessageTree(child, messageFilter);
+		if( filteredChild !== child ) anyChildrenChanged = true;
+		if( !messageTreeIsEmpty(filteredChild) ) filteredChildren.set(k,filteredChild);
+	}
+	const children = anyChildrenChanged ? filteredChildren : tree.children;
+	
+	const filteredMessages = tree.messages.filter(messageFilter);
+	const messages = filteredMessages.length != tree.messages.length ? filteredMessages : tree.messages;
+	
 	if( children.size == 0 && messages.length == 0 ) return EMPTY_MESSAGE_TREE;
+	if( children === tree.children && messages === tree.messages ) return tree;
 	return { messages, children };
 }
 
@@ -406,7 +417,10 @@ class Dashboard implements SizedRasterable {
 		
 		const maxShownMessageCount = 3;
 		
-		this.#messageTree = trimMessageTree(this.#messageTree, m => m.value.length > 0);
+		this.#messageTree = pruneMessageTree(
+			freezeMessageTree(this.#messageTree),
+			m => m.value.length > 0
+		);
 		
 		walkMessageTree([], this.#messageTree, (path,node) => {
 			if( path.length == 0 ) return; // Hopefully no messages here lamo

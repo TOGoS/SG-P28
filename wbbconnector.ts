@@ -109,7 +109,7 @@ async function attemptToConnect(
 	
 	// let device = await adapter.waitForDevice(macAddress);
 	
-	statusUpdated(null);
+	statusUpdated("getting-device-handle");
 	
 	logger.info(`Getting device for ${macAddress}...`);
 	[device] = await adapter.getDevices(macAddress);
@@ -144,13 +144,15 @@ async function attemptToConnect(
 	
 	logger.info(`Device: ${JSON.stringify(device)}`);
 	
+	statusUpdated("removing-device");
+	
 	//adapter.removeDevice(device);
 	await adapter.callMethod('RemoveDevice', [dbusTypes.objectPathType], [device.objectPath]);
 	checkAbort();
 	logger.info(`${macAddress} removed`);
 	
 	logger.info(`Waiting for ${macAddress} again...`);
-	statusUpdated("offline");
+	statusUpdated("getting-device-handle-again");
 	
 	const reconnectTimeout = 5000;
 	device = await waitForDeviceOrAbort(adapter, macAddress, AbortSignal.any([abortSignal, AbortSignal.timeout(reconnectTimeout)]));
@@ -219,11 +221,17 @@ class WBBConnectorV2 extends ProcessGroup {
 		forceDance: true, // Otherwise we can't match it up with a /dev/input/whatever!
 		abortSignal: this.#abortSignal,
 	}
+	#refreshTimer : number|undefined;
 	
 	constructor(opts:{id?:string, logger?:Logger}={}) {
 		super(opts);
 		this.#logger = opts.logger ?? NULL_LOGGER;
 		this.#dBus = new SystemDBus();
+		this.#refreshTimer = setInterval(this.#refresh.bind(this), 2000);
+	}
+	
+	#refresh() {
+		this.#logger.update("status","connected",true);
 	}
 	
 	override kill(sig: Deno.Signal): void {
@@ -344,6 +352,10 @@ class WBBConnectorV2 extends ProcessGroup {
 	}
 	
 	override dispose() {
+		if( this.#refreshTimer ) {
+			clearInterval(this.#refreshTimer);
+			this.#refreshTimer = undefined;
+		}
 		try { this.#dBus.disconnect(); } catch( _e ) { /* ignore */ }
 		if( this.#unlockAdapter ) this.#unlockAdapter();
 		return Promise.resolve();

@@ -21,11 +21,11 @@ export class MQTTLogger implements Logger {
 		await this.#mqttThen(client => client.connect({
 			will: {
 				topic: this.#statusTopic,
-				payload: textEncoder.encode("offline"),
+				payload: textEncoder.encode("lost"),
 				retain: true,
 			}
 		}));
-		await this.#mqttThen(client => client.publish(this.#statusTopic, 'online', { retain: true }));
+		await this.#mqttThen(client => client.publish(this.#statusTopic, 'connected', { retain: true }));
 	}
 	info(text: string) {
 		return ignoreResult(this.#mqttThen(client => client.publish(this.#chatTopic, text)));

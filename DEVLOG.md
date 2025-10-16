@@ -109,9 +109,29 @@ The TUI framework is still horribly inefficient,
 but even when redrawing the dashboard a couple times per second,
 it is only using 2% CPU, so maybe not a bottleneck just yet.
 
-### TODO
 
-- [ ] wbbconnector: Standardize WBB connection statuses;
+## 2025-10-15
+
+### Minor updates
+
+Standardizing on 'connected' / 'disconnected' / 'lost' statuses
+for MQTT-connected devices (reports about sub-devices, like WBBs,
+don't necessarily need to follow this).
+
+For the WBBs, I changed the reported statuses a bit
+so include more detail and indicate 'getting-device-handle[-again]'
+instead of leaving the device's status blank.
+
+[WBBConnector](./wbbconnector.ts) and [MultiOscify](./multioscify.ts)
+both re-publish their status (and in multioscify's case, a summary of sub-processes)
+every two seconds, so that you can tell from dashboard if they are actually
+still running or have hung (which wbbconnector sometimes does).
+
+![Dashboard showing the system actually reading WBB events](http://picture-files.nuke24.net/uri-res/raw/urn:bitprint:I4PF3JXVWCSYWKNYBWHGNLIGYKDWZNYB.KSLCQHN5G63NLDOILMR5MDIJKDF3AW3FABMF3EA/20251015T2120-ActuallyReadingFromAWBB.png)
+
+### Checkmarks
+
+- [X] wbbconnector: Standardize WBB connection statuses;
   sometimes status is undefined, other times it's 'offline';
   shouldn't that be 'disconnected' if the good state is 'connected'?
   - [Homie](https://homieiot.github.io/specification/) uses '$state' instead of 'status',
@@ -121,9 +141,9 @@ it is only using 2% CPU, so maybe not a bottleneck just yet.
 	 - Maybe I intended at some point to standardize on 'connected'/'disconnected'.
 	   I don't really care to distinguish between 'disconnected' and 'lost',
 	   though maybe I should just let everything be 'lost' by default.
-- [ ] Dashboard: Indicate retain flag
-- [ ] Dashboard: Indicate freshness of values somehow, at least the 'status' ones
-- [ ] Have multioscify publish more info to MQTT
-  - [ ] Maybe a 'summary' attribute, indicating basics of configuration, current status
-  - [ ] What it's up to; currently it just sits there, not clear if doing anything!
-  - [ ] Read values!
+- [X] Dashboard: Indicate retain flag
+- [X] Dashboard: Indicate freshness of values somehow, at least the 'status' ones
+- [X] Have multioscify publish more info to MQTT
+  - [X] Maybe a 'summary' attribute, indicating basics of configuration, current status
+  - [X] What it's up to; currently it just sits there, not clear if doing anything!
+  - [X] Read values!

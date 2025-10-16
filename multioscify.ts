@@ -9,7 +9,7 @@
 //   --control-root=mqtt://localhost:1883/(mytopic)/
 //   --udp-local-port=1234
 // MQTT topics (output):
-//   (prefix)status :: status of this process ("online" or "offline")
+//   (prefix)status :: status of this process ("connected" or "disconnected")
 //   (prefix)readers/(reader name)/target
 //   (prefix)readers/(reader name)/inputpath
 //   (prefix)readers/(reader name)/status :: "running" or undefined
@@ -130,7 +130,7 @@ function spawnOscifier(devicePath : FilePath, eventSink : (evt:InputEvent) => vo
 			
 			let statpubtimer : number|undefined;
 			try {
-				logger.update('status','online',true);
+				logger.update('status','running',true);
 				let byteCount = 0;
 				let eventCount = 0;
 				let minValue = Infinity;
@@ -158,7 +158,7 @@ function spawnOscifier(devicePath : FilePath, eventSink : (evt:InputEvent) => vo
 					maxValue = Math.max(maxValue, event.value);
 				}
 			} finally {
-				logger.update('status','offline');
+				logger.update('status','stopped');
 				if(statpubtimer != undefined) clearInterval(statpubtimer);
 			}
 			
@@ -177,14 +177,40 @@ function errString(err:any) : string {
 }
 
 class OSCifierControl extends ProcessGroup {
-	#oscifiers : {[name:string]: OSCifier} = {};
+	#oscifiers : Map<string,OSCifier> = new Map;
 	#logger : Logger;
 	#eventSinkSource : (uri:URI) => (evt:InputEvent) => void;
+	#refreshTimer : number|undefined;
 	
 	constructor( logger: Logger, eventSinkSource:((uri:URI) => (evt:InputEvent) => void), opts:{id?:string, abortController?:AbortController}={} ) {
 		super(opts);
 		this.#logger = logger;
 		this.#eventSinkSource = eventSinkSource;
+		
+		this.#requestSummaryUpdate();
+		this.#refreshTimer = setInterval(this.#requestSummaryUpdate.bind(this), 2000);
+	}
+	
+	override dispose() {
+		if( this.#refreshTimer ) {
+			clearTimeout(this.#refreshTimer);
+			this.#refreshTimer = undefined;
+		}
+		return super.dispose();
+	}
+	
+	#updateSummary() {
+		let onlineCount = 0;
+		for( const [k,osc] of this.#oscifiers ) {
+			if( osc.currentProcess ) ++onlineCount;
+		}
+		this.#logger.update("summary", `${this.#oscifiers.size} OSCifiers, ${onlineCount} running`)
+	}
+	
+	#requestSummaryUpdate() {
+		// Could debounce or something but for now just do it
+		this.#logger.update("status","connected");
+		this.#updateSummary();
 	}
 	
 	#spawnOscifier(devicePath:string, targetUri:URI, readerLogger:Logger) : OSCifierProcess|undefined {
@@ -196,7 +222,7 @@ class OSCifierControl extends ProcessGroup {
 			sink = this.#eventSinkSource(targetUri);
 			oscifier = spawnOscifier(devicePath, sink, readerLogger);
 		} catch( e ) {
-			readerLogger.update("status", "offline", true);
+			readerLogger.update("status", "disconnected", true);
 			readerLogger.update("error", errString(e), true);
 			return undefined;
 		}
@@ -206,9 +232,9 @@ class OSCifierControl extends ProcessGroup {
 	
 	setReaderProp(readerName:string, propName:"inputPath"|"targetUri", value:string|undefined) : void {
 		if( value == '' ) value = undefined;
-		let osc = this.#oscifiers[readerName];
+		let osc = this.#oscifiers.get(readerName);
 		if( osc == null ) {
-			this.#oscifiers[readerName] = osc = {
+			this.#oscifiers.set(readerName, osc = {
 				currentConfig: {
 					inputPath: undefined,
 					targetUri: undefined,
@@ -218,7 +244,7 @@ class OSCifierControl extends ProcessGroup {
 					targetUri: undefined,
 				},
 				currentProcess: undefined,
-			}
+			});
 		}
 		if( osc.targetConfig[propName] !== value ) {
 			// Target changed!  Kill current process, wait for target to stop changing, and restart.
@@ -246,6 +272,11 @@ class OSCifierControl extends ProcessGroup {
 					
 					this.#logger.info(`Spawning oscifier from ${targetConfig.inputPath} to ${targetConfig.targetUri}`);
 					osc.currentProcess = this.#spawnOscifier(targetConfig.inputPath!, targetConfig.targetUri!, readerLogger);
+					this.#requestSummaryUpdate();
+					osc.currentProcess?.wait().then(_code => {
+						osc.currentProcess = undefined;
+						this.#requestSummaryUpdate();
+					})
 				}, 200);
 			};
 		}
@@ -367,7 +398,7 @@ async function main(sig:AbortSignal, config:MultiOscifyConfig) : Promise<number>
 			await mqttClient.subscribe(subtop);
 		}
 		
-		mqttClient.publish(statusTopic, "online");
+		mqttClient.publish(statusTopic, "connected");
 		const waitForAbort = new Promise((_resolve,reject) => {
 			logger.info(`mqttReader: waiting for abort signal`);
 			sig.addEventListener("abort", (_ev) => {

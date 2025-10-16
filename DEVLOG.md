@@ -147,3 +147,9 @@ still running or have hung (which wbbconnector sometimes does).
   - [X] Maybe a 'summary' attribute, indicating basics of configuration, current status
   - [X] What it's up to; currently it just sits there, not clear if doing anything!
   - [X] Read values!
+
+## TODO
+
+- [ ] Sometimes multioscify says 0 oscifiers running,
+  even though one will have the state of 'running'!
+- [ ] Fix race condition in TUI library

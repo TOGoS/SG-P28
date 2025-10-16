@@ -6,29 +6,28 @@ exitcode=69
 # or restart, and how long to wait,
 # given different exit codes.
 
-# while [ $exitcode -eq 69 ]
-while true
-do
-	echo "# looper: Starting $1..."
-	"$@"
-	exitcode=$?
-	echo "# looper: $1 exited with status $exitcode"
-	if [ $exitcode -eq 69 ]
-	then
-		continue=1
-		sleeptime=1
-	else
-		continue=0
-		sleeptime=5
-	fi
-	
-	if [ "$continue" -eq "1" ]
-	then
-		echo "# looper: Will restart in $sleeptime seconds"
-	else
-		echo "# looper: Will exit with code $exitcode"
-	fi
-	sleep 2
-done
+echo "# looper: Starting $(printf '"%s\" ' "$@")..."
+"$@"
+exitcode=$?
+echo "# looper: $1 exited with status $exitcode"
+if [ $exitcode -eq 69 ]
+then
+	continue=1
+	sleeptime=1
+else
+	continue=1
+	sleeptime=5
+fi
 
-exit $exitcode
+if [ "$continue" -eq "1" ]
+then
+	echo "# looper: Will restart in $sleeptime seconds"
+	sleep $sleeptime
+	exec "$0" "$@"
+else
+	echo "# looper: Will exit with code $exitcode"
+	sleep $sleeptime
+	exit $exitcode
+fi
+
+

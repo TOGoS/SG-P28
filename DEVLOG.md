@@ -152,4 +152,12 @@ still running or have hung (which wbbconnector sometimes does).
 
 - [ ] Sometimes multioscify says 0 oscifiers running,
   even though one will have the state of 'running'!
-- [ ] Fix race condition in TUI library
+- [ ] Do something about connector getting stuck at "Getting device for"
+- [ ] TUO library: Fix race condition 
+- [ ] Dashboard: Remove log; it's not super useful
+- [ ] Dashboard: Remove framing; can just have horizontal rules between sections on screen
+- [ ] Dashboard: Add command input at bottom
+- [ ] TUI library: Make sure we're only redrawing changed parts of the screen
+- [ ] TUI library: More efficient (batched) textToRaster function?
+- [ ] TUI library: Improve efficiency of component framework by memoizing trivially memoizable stuff
+- [ ] TUI library: Unit tests for all changes!!

@@ -437,10 +437,14 @@ class Dashboard implements SizedRasterable {
 		const statusLines : StyledTextFragment[][] = [];
 		
 		const maxShownMessageCount = 3;
+		const maxNonRetainedMessageAge = 1000*60*15;
 		
 		this.#messageTree = pruneMessageTree(
 			freezeMessageTree(this.#messageTree),
-			m => m.value.length > 0
+			m => m.value.length > 0 && (
+				m.retained || this.#clockTime == undefined ||
+				this.#clockTime - m.received < maxNonRetainedMessageAge
+			)
 		);
 		
 		walkMessageTree([], this.#messageTree, (path,node) => {

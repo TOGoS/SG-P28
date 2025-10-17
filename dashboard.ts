@@ -430,7 +430,7 @@ class Dashboard implements SizedRasterable {
 				{text:` (up ${prettyDurationHms(this.#clockTime - this.#startTime)})`, style:""}
 			] : [])
 		]);
-		const logBox = padSides(new AbstractTextRasterable(blackBackground, this.#logMessages.map(text => [{text,style:""}])));
+		// const logBox = padSides(new AbstractTextRasterable(blackBackground, this.#logMessages.map(text => [{text,style:""}])));
 		
 		// TODO: LogRasterable should accept spans so it can be pretty
 		// TODO: Pad the keys maybe?
@@ -488,20 +488,20 @@ class Dashboard implements SizedRasterable {
 				flexGrowAlong: 1,
 				flexShrinkAlong: 1,
 			},
-			{
+			/*{
 				component: logBox,
 				flexGrowAcross: 1,
 				flexShrinkAcross: 1,
 				flexGrowAlong: 1,
 				flexShrinkAlong: 1,
-			}
+			}*/
 		], {
-			alongBeforeSpace: 1,
+			alongBeforeSpace: 0,
 			alongBetweenSpace: 1,
-			alongAfterSpace: 1,
-			acrossBeforeSpace: 1,
+			alongAfterSpace: 0,
+			acrossBeforeSpace: 0,
 			acrossBetweenSpace: 1,
-			acrossAfterSpace: 1,
+			acrossAfterSpace: 0,
 		});
 		
 		/*

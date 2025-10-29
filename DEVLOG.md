@@ -204,9 +204,12 @@ I suppose dashboard should have ways to do all the
 things that would otherwise have to be done manually,
 since it is the dashboard.
 
+![Screenshot of this DEVLOG + some status stuff](http://picture-files.nuke24.net/uri-res/raw/urn:bitprint:T6P5IFY463XZIWZU2GE5GC6MSG4U2SJG.DJSVDKRRDYLKRCVVML2FROTDJ3QKZVA4BJ7HX2I/20251029T14-ConnectedAndWallPowered.png)
+
 ### So, given all that, TODO
 
 - [X] MultiOscify: Restart reader when poked if process has quit
+- [ ] MultiOscify: Republish reader status once in a while (at least while running)
 - [ ] Dashboard: Shorter timeouts for known-transient messages, like '.../set'
   - Maybe just a shorter timeout for all non-retained messages?
 - [ ] Dasboard: highlight reader status; 'running', 'stopped'

@@ -161,3 +161,42 @@ still running or have hung (which wbbconnector sometimes does).
 - [ ] TUI library: More efficient (batched) textToRaster function?
 - [ ] TUI library: Improve efficiency of component framework by memoizing trivially memoizable stuff
 - [ ] TUI library: Unit tests for all changes!!
+
+## 2025-10-29
+
+### Dummy Batteries
+
+Following Stewie's example, I ordered a couple of these: https://www.amazon.com/dp/B09YTVTZ1V
+Installed one into 58-BD-A3-AC-20-AD, and it seems to be working.
+Installed one into 00-21-BD-D1-5C-A9, and it seems to be working, too!
+
+### Controlling MultiOscity
+
+I always have to look up 'how to tell multioscify what to do'.
+
+What you need to do is, once the WBB is connected and has a `/dev/input` device,
+and you have decided where you want OSC packets to go, do something like:
+
+```
+mosquitto_pub -h localhost -t smp/multioscify1/readers/wbb01/target/set -m osc+udp://192.168.9.151:5577/wbb01
+mosquitto_pub -h localhost -t smp/multioscify1/readers/wbb01/inputpath/set -m /dev/input/event13
+```
+
+This should be automated somehow, I suppose.
+
+### Notes on WBBConnector
+
+Gets stuck at `getting-device-handle` if you just push the button in front
+(this may be a matter of needing another `statusUpdated` call).
+
+Once the devices are connected, the status checks that happen every few seconds are 'noisy'.
+By which I mean I can actually hear them happening due to the radio waves
+messing with the signals to my amplifier, just like how mocing my mouse is audible.
+
+It might be nice if it backed off for a while, or maybe if the connection interval
+could be controlled via MQTT.
+
+Not sure where this orchestration should happen.
+I suppose dashboard should have ways to do all the
+things that would otherwise have to be done manually,
+since it is the dashboard.

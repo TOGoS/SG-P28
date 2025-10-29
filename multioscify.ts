@@ -246,7 +246,7 @@ class OSCifierControl extends ProcessGroup {
 				currentProcess: undefined,
 			});
 		}
-		if( osc.targetConfig[propName] !== value ) {
+		if( osc.targetConfig[propName] !== value || osc.currentProcess == undefined ) {
 			// Target changed!  Kill current process, wait for target to stop changing, and restart.
 			const targetConfig = {...osc.targetConfig, [propName]: value};
 			osc.targetConfig = targetConfig;

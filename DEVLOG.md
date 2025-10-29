@@ -184,6 +184,9 @@ mosquitto_pub -h localhost -t smp/multioscify1/readers/wbb01/inputpath/set -m /d
 
 This should be automated somehow, I suppose.
 
+Hmm, maybe after I dis/reconnected the board, multioscify reports that
+reader `wbb01` is stopped.  Setting 
+
 ### Notes on WBBConnector
 
 Gets stuck at `getting-device-handle` if you just push the button in front
@@ -200,3 +203,11 @@ Not sure where this orchestration should happen.
 I suppose dashboard should have ways to do all the
 things that would otherwise have to be done manually,
 since it is the dashboard.
+
+### So, given all that, TODO
+
+- [X] MultiOscify: Restart reader when poked if process has quit
+- [ ] Dashboard: Shorter timeouts for known-transient messages, like '.../set'
+  - Maybe just a shorter timeout for all non-retained messages?
+- [ ] Dasboard: highlight reader status; 'running', 'stopped'
+- [ ] Automatically start readers when WBBs are connected!

@@ -11,6 +11,7 @@
 
 screen -t 'WBB Connector' ./looper ./wbbconnector-demo
 screen -t 'WBB Multi-Oscify' ./looper ./multioscify-demo
-screen -t 'Dashboard' ./looper ./dashboard-demo
+screen -t 'WBB Dashboard' ./looper ./dashboard-demo
+screen -t 'WBB Director' ./looper ./multioscify-director
 
 echo Services started in new Screen windows.

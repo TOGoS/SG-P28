@@ -1,0 +1,3 @@
+#!/bin/bash
+
+./looper deno run --unstable-net --check=all -A multioscify-director.ts --control-root=mqtt://localhost/smp/multioscify-director --logger=console
